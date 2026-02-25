@@ -175,7 +175,7 @@ fn row_to_recurring(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecurringEntry>
         tag_id: row.get(4)?,
         interval,
         start_date,
-        last_inserted_date: last_inserted_date,
+        last_inserted_date,
         active: active_int != 0,
     })
 }

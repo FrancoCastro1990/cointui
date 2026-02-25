@@ -40,6 +40,18 @@ impl Database {
         &self.conn
     }
 
+    /// Create a backup of this database to the given path using SQLite's
+    /// online backup API.
+    pub fn backup_to(&self, dest: &Path) -> Result<()> {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut dest_conn = Connection::open(dest)?;
+        let backup = rusqlite::backup::Backup::new(&self.conn, &mut dest_conn)?;
+        backup.run_to_completion(100, std::time::Duration::from_millis(10), None)?;
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
@@ -167,5 +179,35 @@ mod tests {
         let db2 = Database::in_memory().unwrap();
         assert!(db.conn().is_autocommit());
         assert!(db2.conn().is_autocommit());
+    }
+
+    #[test]
+    fn backup_creates_valid_copy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let src_path = tmp.path().join("source.db");
+        let backup_path = tmp.path().join("backup.db");
+
+        let db = Database::new(&src_path).unwrap();
+        // Insert some data.
+        db.conn()
+            .execute(
+                "INSERT INTO tags (name) VALUES (?1)",
+                rusqlite::params!["BackupTest"],
+            )
+            .unwrap();
+
+        db.backup_to(&backup_path).unwrap();
+
+        // Open the backup and verify data.
+        let backup_db = Database::new(&backup_path).unwrap();
+        let name: String = backup_db
+            .conn()
+            .query_row(
+                "SELECT name FROM tags WHERE name = 'BackupTest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "BackupTest");
     }
 }

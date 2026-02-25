@@ -278,7 +278,7 @@ impl TransactionForm {
 }
 
 /// Calculate a centered popup rectangle.
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let popup_layout = Layout::vertical([
         Constraint::Percentage((100 - percent_y) / 2),
         Constraint::Percentage(percent_y),
@@ -465,7 +465,7 @@ pub fn draw_form(frame: &mut Frame, form: &TransactionForm, currency: &str) {
     }
 }
 
-fn render_text_field(
+pub(crate) fn render_text_field(
     frame: &mut Frame,
     area: Rect,
     label: &str,
@@ -504,7 +504,7 @@ fn render_text_field(
     );
 }
 
-fn render_toggle_field(
+pub(crate) fn render_toggle_field(
     frame: &mut Frame,
     area: Rect,
     label: &str,

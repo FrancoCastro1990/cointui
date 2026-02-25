@@ -75,6 +75,8 @@ fn draw_filter_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
 fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
     let block = theme::styled_block(" Transactions ");
 
     let header = Row::new(vec!["Date", "Source", "Amount", "Type", "Tag"])
@@ -102,7 +104,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 Cell::from(tx.date.format("%Y-%m-%d").to_string()),
                 Cell::from(tx.source.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(tx.amount, currency),
+                    format_centavos(tx.amount, currency, tsep, dsep),
                     amount_style,
                 )),
                 Cell::from(Span::styled(kind_str, amount_style)),

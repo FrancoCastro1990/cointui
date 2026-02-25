@@ -1,4 +1,6 @@
-# CoinTUI - Claude Code Guidelines
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -7,24 +9,27 @@ CoinTUI is a terminal-based personal finance manager built with Rust, Ratatui 0.
 ## Build & Test Commands
 
 ```bash
-cargo check          # Fast compilation check
-cargo build          # Debug build
-cargo build --release # Release build
-cargo test           # Run all tests (37 unit + integration)
-cargo clippy         # Lint
-cargo run            # Run the TUI app
-cargo run -- --help  # Show CLI help
+cargo check                        # Fast compilation check
+cargo build                        # Debug build
+cargo build --release              # Release build
+cargo test                         # Run all tests (47 unit + integration)
+cargo test test_name               # Run a single test by name
+cargo test module::tests           # Run tests in a specific module (e.g. cargo test cli::add::tests)
+cargo clippy                       # Lint (must pass with zero warnings)
+cargo run                          # Run the TUI app
+cargo run -- --help                # Show CLI help
 ```
 
 ## Architecture
 
 ### Layers (top to bottom)
 
-1. **UI** (`src/ui/`) - Ratatui widgets, views, theme. Renders `&App` state into terminal frames.
-2. **Event** (`src/event.rs`) - `AppCommand` enum + `EventHandler` polling crossterm events.
-3. **App** (`src/app.rs`) - Central state machine. Owns `Database`, dispatches commands, manages cached data.
-4. **Domain** (`src/domain/models.rs`) - Pure data structs: `Transaction`, `Tag`, `Budget`, `RecurringEntry`.
-5. **Repository** (`src/db/`) - SQLite CRUD. Each repo takes `&Database` reference.
+1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--import`, `--export`, `--backup`, `--restore`) that run before TUI launch and exit.
+2. **UI** (`src/ui/`) - Ratatui widgets, views, theme. Renders `&App` state into terminal frames.
+3. **Event** (`src/event.rs`) - `AppCommand` enum + `EventHandler` polling crossterm events.
+4. **App** (`src/app.rs`) - Central state machine. Owns `Database`, dispatches commands, manages cached data.
+5. **Domain** (`src/domain/models.rs`) - Pure data structs: `Transaction`, `Tag`, `Budget`, `RecurringEntry`.
+6. **Repository** (`src/db/`) - SQLite CRUD. Each repo takes `&Database` reference.
 
 ### Key types
 
@@ -43,34 +48,12 @@ KeyEvent -> app.handle_key() -> modifies App state + calls repos -> ui::draw() r
 
 The event loop in `main.rs`: draw -> poll event -> handle -> tick -> repeat.
 
-## File Map
-
-| File | Purpose |
-|------|---------|
-| `src/main.rs` | Entry point, terminal setup/restore, event loop |
-| `src/app.rs` | App state machine, key handling, command dispatch |
-| `src/event.rs` | `AppCommand`, `AppEvent`, `EventHandler` |
-| `src/error.rs` | `AppError` enum (thiserror), `Result<T>` alias |
-| `src/config.rs` | `AppConfig` TOML loading/saving, XDG paths |
-| `src/domain/models.rs` | All domain structs + `format_centavos()` helper |
-| `src/db/connection.rs` | `Database` struct, schema creation, migrations |
-| `src/db/transaction_repo.rs` | `TransactionRepo` + `TransactionFilter` |
-| `src/db/tag_repo.rs` | `TagRepo` (hierarchical tags) |
-| `src/db/budget_repo.rs` | `BudgetRepo` + period-aware spent calculation |
-| `src/db/recurring_repo.rs` | `RecurringRepo` |
-| `src/ui/mod.rs` | Main `draw()` dispatcher, tabs, status bar, confirm dialog |
-| `src/ui/theme.rs` | Tokyo Night color palette, style helpers |
-| `src/ui/views/dashboard.rs` | Header (income/balance/expenses), recent transactions, alerts |
-| `src/ui/views/transactions.rs` | Standalone transaction table (unused, inline in ui/mod.rs) |
-| `src/ui/views/form.rs` | `TransactionForm` + `draw_form()` popup overlay |
-| `src/ui/views/stats.rs` | BarChart, summary, monthly table |
-| `src/ui/views/budget.rs` | Budget list with Gauge progress bars |
-| `src/ui/views/recurring.rs` | Recurring entry table (standalone version) |
+CLI commands (`--add`, `--import`, etc.) bypass the event loop entirely — they run in `main()` before terminal initialization and return early.
 
 ## Conventions
 
 ### Amounts
-All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(amount, currency)` from `domain::models` for display. Never use `f64` for money.
+All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(amount, currency, thousands_sep, decimal_sep)` from `domain::models` for display. The separators come from `AppConfig` (default: `.` for thousands, `,` for decimal — Chilean format). Never use `f64` for money (only at CLI input boundary, immediately converted via `(f64 * 100.0).round() as i64`).
 
 ### Error handling
 - All fallible operations return `crate::error::Result<T>`
@@ -79,16 +62,15 @@ All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(am
 - Use `?` operator to propagate errors
 
 ### Database
-- All queries use parameterized `rusqlite::params![]` - never interpolate user data into SQL
+- All queries use parameterized `rusqlite::params![]` — never interpolate user data into SQL
 - Repos take `&Database` references, not raw `Connection`
 - Schema lives in `Database::initialize_schema()` in `connection.rs`
 - Migrations use `PRAGMA user_version` (currently at version 1)
 - Foreign keys are enforced, WAL mode is enabled
 
 ### UI / Ratatui patterns
-- Use `ratatui::init()` / `ratatui::restore()` for terminal lifecycle
 - Layouts use `Layout::vertical/horizontal` with `.areas()` destructuring
-- Theme colors and styles come from `ui::theme` - don't hardcode colors in views
+- Theme colors and styles come from `ui::theme` — don't hardcode colors in views
 - Use `theme::styled_block(title)` for consistent bordered blocks
 - Tables needing selection use `render_stateful_widget` with `TableState`
 - Popups render `Clear` widget first, then the popup content on top
@@ -99,6 +81,7 @@ All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(am
 - Auto-created with defaults on first run
 - `AppConfig` uses `directories` crate for XDG paths
 - DB at `~/.local/share/cointui/cointui.db` by default
+- Number format defaults: `thousands_separator = "."`, `decimal_separator = ","` (Chilean). New config fields use `#[serde(default)]` for backward compatibility with existing config files.
 
 ### Adding a new view
 1. Add variant to `View` enum in `app.rs`
@@ -107,6 +90,12 @@ All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(am
 4. Add match arm in `ui::draw()` in `src/ui/mod.rs`
 5. Add keybinding in `App::handle_key()` for the new view
 6. Update tab titles in `draw_tabs()`
+
+### Adding a new CLI command
+1. Create `src/cli/newcmd.rs` with `pub fn run(..., db: &Database) -> Result<()>`
+2. Add `pub mod newcmd;` in `src/cli/mod.rs`
+3. Add flag(s) to `Cli` struct in `main.rs`
+4. Add dispatch block in `main()` before TUI launch (after existing CLI dispatches)
 
 ### Adding a new DB table
 1. Add `CREATE TABLE IF NOT EXISTS` in `Database::initialize_schema()`
@@ -118,15 +107,11 @@ All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(am
 ### Tests
 - DB tests use `Database::in_memory()` for isolated in-memory SQLite
 - Tag repos must seed at least one tag before creating transactions (FK constraint)
-- Run `cargo test` before committing - all 37 tests must pass
+- Run `cargo test` before committing — all 47 tests must pass
 - Test files live alongside source in `#[cfg(test)] mod tests` blocks
 
 ## Pending work (Roadmap)
 
-- Filtering: date range, amount range, tag filter (beyond text search)
-- CSV import with column mapping (`csv` crate already in deps)
-- CSV/JSON export
-- Database backup/restore
-- Extended CLI args (`--import`, `--export`, `--backup`)
-- Help overlay (`?` key)
+- Advanced filtering: date range, amount range, tag filter UI (filter_form.rs exists but not fully wired)
+- Help overlay (`?` key) — `help.rs` exists but not fully wired
 - Sortable transaction table columns

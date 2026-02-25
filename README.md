@@ -12,9 +12,14 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Budgets with alerts** — Set spending limits per category or globally (weekly/monthly/yearly) with visual progress bars and warnings at 80%+ usage
 - **Recurring transactions** — Define recurring entries (daily/weekly/monthly/yearly) that auto-insert on startup
 - **Statistics** — Bar charts by category, monthly trends, income vs. expenses breakdown, and savings rate
-- **Filtering** — Search transactions by text across source and notes fields
+- **Filtering** — Search transactions by text, date range, amount range, kind, and tag
+- **CLI quick-add** — Add transactions directly from the command line without entering the TUI
+- **CSV import** — Import transactions from CSV files with interactive column mapping
+- **CSV/JSON export** — Export all transactions to CSV or JSON format
+- **Database backup/restore** — Create and restore full database backups
 - **Persistent storage** — SQLite database with WAL mode, automatic schema migrations, and safe parameterized queries
-- **Configurable** — TOML config for currency symbol, default tags, and database path
+- **Locale-aware formatting** — Configurable thousands/decimal separators (default: Chilean format `$ 2.700.000,00`)
+- **Configurable** — TOML config for currency symbol, number format, default tags, and database path
 
 ## Installation
 
@@ -36,14 +41,55 @@ The binary will be at `target/release/cointui`.
 ## Usage
 
 ```bash
-# Run with default config
+# Launch the TUI
 cointui
 
 # Use a custom config file
 cointui --config /path/to/config.toml
+```
 
-# Show version
-cointui --version
+### Quick-add transactions from the CLI
+
+```bash
+# Minimal (defaults: kind=expense, date=today, tag=Otros)
+cointui --add "Supermercado" --amount 50.00
+
+# Full options
+cointui --add "Supermercado" --amount 50.00 \
+  --tag Comida --kind expense \
+  --date 2026-02-25 --notes "weekly groceries"
+
+# Income
+cointui --add "Salario" --amount 3000 --kind income --tag Salario
+```
+
+### Import / Export
+
+```bash
+# Import from CSV (interactive column mapping)
+cointui --import transactions.csv
+
+# Export to JSON (format detected from extension)
+cointui --export transactions.json
+
+# Export to CSV
+cointui --export transactions.csv
+
+# Force a specific format
+cointui --export data.txt --format json
+```
+
+### Backup / Restore
+
+```bash
+# Create a backup (auto-generated timestamped filename)
+cointui --backup
+
+# Create a backup at a specific path
+cointui --backup /path/to/backup.db
+
+# Restore from a backup
+cointui --restore /path/to/backup.db
 ```
 
 ## Keybindings
@@ -97,21 +143,21 @@ cointui --version
 
 ```
 ┌─ INCOME ──────┐┌─ BALANCE ─────┐┌─ EXPENSES ────┐
-│   $ 3,500.00   ││   $ 1,200.00   ││   $ 2,300.00   │
+│ $ 3.500.000,00 ││ $ 1.200.000,00 ││ $ 2.300.000,00 │
 └────────────────┘└────────────────┘└────────────────┘
 ┌─ Recent Transactions ─────────────────────────────┐
 │ Date       Source          Amount    Type    Tag   │
-│ 2026-02-25 Supermercado   $ 45.00   expense Comida│
-│ 2026-02-24 Salario      $ 3500.00   income  Salar.│
+│ 2026-02-25 Supermercado  $ 45.000,00 EXP   Comida │
+│ 2026-02-01 Salario    $ 2.700.000,00 INC   Salario│
 └───────────────────────────────────────────────────┘
 ┌─ Budget Alerts ───────────────────────────────────┐
-│ ⚠ Comida: 85% used ($ 425.00 / $ 500.00)         │
+│ ⚠ Comida: 85% used ($ 425.000,00 / $ 500.000,00) │
 └───────────────────────────────────────────────────┘
 ```
 
 ### 2. Transactions
 
-Full scrollable list with all transactions, sortable and filterable. Color-coded amounts (green for income, red for expenses).
+Full scrollable list with all transactions, filterable by text, date, amount, kind, and tag. Color-coded amounts (green for income, red for expenses).
 
 ### 3. Stats
 
@@ -133,6 +179,8 @@ A default config is auto-created on first run:
 
 ```toml
 currency = "$"
+thousands_separator = "."
+decimal_separator = ","
 default_tags = [
     "Comida",
     "Transporte",
@@ -150,6 +198,8 @@ default_tags = [
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `currency` | String | `"$"` | Currency symbol displayed next to amounts |
+| `thousands_separator` | String | `"."` | Thousands grouping separator (e.g. `"."` for `1.000`, `","` for `1,000`) |
+| `decimal_separator` | String | `","` | Decimal separator (e.g. `","` for `1.000,50`, `"."` for `1,000.50`) |
 | `default_tags` | Array | 8 categories | Tags seeded into a fresh database |
 | `db_path` | String | (auto) | Override database file path |
 
@@ -169,11 +219,16 @@ Four tables: `tags`, `transactions`, `budgets`, `recurring_entries`. See `src/db
 
 ```
 src/
-├── main.rs              # Entry point, terminal setup, event loop
+├── main.rs              # Entry point, CLI flag dispatch, terminal setup, event loop
 ├── app.rs               # App state machine (View, Mode, command dispatch)
 ├── event.rs             # Event bus (crossterm events + tick)
 ├── error.rs             # Error types (thiserror)
 ├── config.rs            # TOML configuration
+├── cli/
+│   ├── add.rs           # --add transaction from CLI
+│   ├── import.rs        # --import CSV with column mapping
+│   ├── export.rs        # --export to CSV/JSON
+│   └── backup.rs        # --backup / --restore
 ├── domain/
 │   └── models.rs        # Transaction, Tag, Budget, RecurringEntry
 ├── db/
@@ -186,14 +241,16 @@ src/
     ├── theme.rs         # Tokyo Night color palette
     └── views/
         ├── dashboard.rs # Balance header, recent transactions, alerts
-        ├── transactions.rs  # Full transaction list with filters
+        ├── transactions.rs  # Full transaction list
         ├── form.rs      # Add/edit transaction popup form
+        ├── filter_form.rs   # Advanced filter popup form
         ├── stats.rs     # Charts and financial summaries
         ├── budget.rs    # Budget list with progress gauges
-        └── recurring.rs # Recurring entry management
+        ├── recurring.rs # Recurring entry management
+        └── help.rs      # Help overlay
 ```
 
-**Layered architecture**: UI -> Event Bus -> Domain Services -> Repository (SQLite)
+**Layered architecture**: CLI / UI -> Event Bus -> App State -> Repository (SQLite)
 
 ## Tech stack
 
@@ -205,6 +262,7 @@ src/
 | [chrono](https://github.com/chronotope/chrono) | 0.4 | Date/time handling |
 | [clap](https://github.com/clap-rs/clap) | 4 | CLI argument parsing |
 | [serde](https://serde.rs) + [toml](https://github.com/toml-rs/toml) | 1 / 0.8 | Config serialization |
+| [serde_json](https://github.com/serde-rs/json) | 1 | JSON export |
 | [thiserror](https://github.com/dtolnay/thiserror) | 2 | Error derivation |
 | [csv](https://github.com/BurntSushi/rust-csv) | 1.3 | CSV import/export |
 | [directories](https://github.com/dirs-dev/directories-rs) | 6 | XDG paths |
@@ -212,27 +270,15 @@ src/
 ## Development
 
 ```bash
-# Check compilation
-cargo check
-
-# Run tests (37 tests)
-cargo test
-
-# Run with warnings
-cargo clippy
-
-# Build release
+cargo check          # Fast compilation check
+cargo test           # Run all tests (47 tests)
+cargo clippy         # Lint (must pass with zero warnings)
 cargo build --release
 ```
 
 ## Roadmap
 
-- [ ] CSV import with column mapping
-- [ ] CSV/JSON export
-- [ ] Database backup and restore
-- [ ] Advanced filtering (date range, amount range, tag)
-- [ ] Extended CLI args (`--import`, `--export`, `--backup`)
-- [ ] Help overlay (`?`)
+- [ ] Help overlay (`?` key)
 - [ ] Sortable columns in transaction table
 
 ## License

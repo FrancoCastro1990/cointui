@@ -1,6 +1,8 @@
 pub mod budget;
 pub mod dashboard;
+pub mod filter_form;
 pub mod form;
+pub mod help;
 pub mod recurring;
 pub mod stats;
 pub mod transactions;

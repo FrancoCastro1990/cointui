@@ -21,6 +21,8 @@ pub fn draw_recurring(frame: &mut Frame, app: &mut App) {
 
 fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
     let block = theme::styled_block(" Recurring Entries ");
 
     if app.recurring_entries.is_empty() {
@@ -64,7 +66,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 Cell::from(Span::styled(status, status_style)),
                 Cell::from(entry.source.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(entry.amount, currency),
+                    format_centavos(entry.amount, currency, tsep, dsep),
                     amount_style,
                 )),
                 Cell::from(Span::styled(kind_str, amount_style)),

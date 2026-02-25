@@ -11,6 +11,12 @@ use crate::error::{AppError, Result};
 pub struct AppConfig {
     /// Currency symbol displayed next to amounts (e.g. `"$"`, `"€"`).
     pub currency: String,
+    /// Thousands separator for amount display (e.g. `"."` for Chilean, `","` for US).
+    #[serde(default = "default_thousands_separator")]
+    pub thousands_separator: String,
+    /// Decimal separator for amount display (e.g. `","` for Chilean, `"."` for US).
+    #[serde(default = "default_decimal_separator")]
+    pub decimal_separator: String,
     /// Tags that are seeded into a fresh database.
     pub default_tags: Vec<String>,
     /// Override for the database file path. When `None` the default XDG data
@@ -18,10 +24,20 @@ pub struct AppConfig {
     pub db_path: Option<PathBuf>,
 }
 
+fn default_thousands_separator() -> String {
+    ".".into()
+}
+
+fn default_decimal_separator() -> String {
+    ",".into()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             currency: "$".into(),
+            thousands_separator: ".".into(),
+            decimal_separator: ",".into(),
             default_tags: vec![
                 "Comida".into(),
                 "Transporte".into(),

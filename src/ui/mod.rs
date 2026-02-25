@@ -6,8 +6,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, Mode, View};
+use crate::app::{App, Mode, SortColumn, SortDirection, View};
+use crate::ui::views::filter_form::draw_filter_form;
 use crate::ui::views::form::draw_form;
+use crate::ui::views::help::draw_help;
 
 /// Main draw function: dispatches to the current view's renderer.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -30,10 +32,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     // Draw the form overlay if in Adding or Editing mode.
-    if matches!(app.mode, Mode::Adding | Mode::Editing) {
-        if let Some(ref form) = app.form {
+    if matches!(app.mode, Mode::Adding | Mode::Editing)
+        && let Some(ref form) = app.form {
             draw_form(frame, form, &app.config.currency);
         }
+
+    // Draw the filter form overlay.
+    if matches!(app.mode, Mode::Filtering)
+        && let Some(ref filter_form) = app.filter_form {
+            draw_filter_form(frame, filter_form, &app.config.currency);
+        }
+
+    // Draw help overlay.
+    if matches!(app.mode, Mode::Help) {
+        draw_help(frame, app.current_view);
     }
 
     // Draw confirmation dialog if confirming.
@@ -112,9 +124,32 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
         use crate::domain::models::{format_centavos, TransactionKind};
 
         let currency = app.config.currency.clone();
+        let tsep = app.config.thousands_separator.clone();
+        let dsep = app.config.decimal_separator.clone();
         let block = theme::styled_block(" Transactions ");
 
-        let header = Row::new(vec!["Date", "Source", "Amount", "Type", "Tag"])
+        let sort_indicator = match app.sort_direction {
+            SortDirection::Ascending => " \u{25b2}",
+            SortDirection::Descending => " \u{25bc}",
+        };
+        let header_cols: Vec<String> = vec![
+            ("Date", SortColumn::Date),
+            ("Source", SortColumn::Source),
+            ("Amount", SortColumn::Amount),
+            ("Type", SortColumn::Kind),
+            ("Tag", SortColumn::Tag),
+        ]
+        .into_iter()
+        .map(|(name, col)| {
+            if col == app.sort_column {
+                format!("{name}{sort_indicator}")
+            } else {
+                name.to_string()
+            }
+        })
+        .collect();
+
+        let header = Row::new(header_cols)
             .style(theme::header_style().add_modifier(Modifier::UNDERLINED))
             .bottom_margin(1);
 
@@ -135,7 +170,7 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
                     Cell::from(tx.date.format("%Y-%m-%d").to_string()),
                     Cell::from(tx.source.clone()),
                     Cell::from(Span::styled(
-                        format_centavos(tx.amount, &currency),
+                        format_centavos(tx.amount, &currency, &tsep, &dsep),
                         amount_style,
                     )),
                     Cell::from(Span::styled(kind_str, amount_style)),
@@ -170,31 +205,25 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
 
     // Draw footer.
     {
-        // Check if we are in filtering mode.
-        if let Mode::Filtering(ref input) = app.mode {
-            let line = Line::from(vec![
-                Span::styled(" Search: ", theme::header_style()),
-                Span::styled(format!("{}_", input), theme::text_style()),
-                Span::styled("  (Enter to apply, Esc to cancel)", theme::muted_style()),
-            ]);
-            frame.render_widget(Paragraph::new(line), footer_area);
-        } else {
-            let help = Line::from(vec![
-                Span::styled(" [a]", theme::header_style()),
-                Span::styled("dd ", theme::text_style()),
-                Span::styled("[e]", theme::header_style()),
-                Span::styled("dit ", theme::text_style()),
-                Span::styled("[d]", theme::header_style()),
-                Span::styled("elete ", theme::text_style()),
-                Span::styled("[/]", theme::header_style()),
-                Span::styled("filter ", theme::text_style()),
-                Span::styled("[c]", theme::header_style()),
-                Span::styled("lear filter ", theme::text_style()),
-                Span::styled("[Esc]", theme::header_style()),
-                Span::styled("back ", theme::text_style()),
-            ]);
-            frame.render_widget(Paragraph::new(help), footer_area);
-        }
+        let help = Line::from(vec![
+            Span::styled(" [a]", theme::header_style()),
+            Span::styled("dd ", theme::text_style()),
+            Span::styled("[e]", theme::header_style()),
+            Span::styled("dit ", theme::text_style()),
+            Span::styled("[d]", theme::header_style()),
+            Span::styled("el ", theme::text_style()),
+            Span::styled("[/]", theme::header_style()),
+            Span::styled("filter ", theme::text_style()),
+            Span::styled("[c]", theme::header_style()),
+            Span::styled("lear ", theme::text_style()),
+            Span::styled("[s]", theme::header_style()),
+            Span::styled("ort ", theme::text_style()),
+            Span::styled("[S]", theme::header_style()),
+            Span::styled("dir ", theme::text_style()),
+            Span::styled("[?]", theme::header_style()),
+            Span::styled("help", theme::text_style()),
+        ]);
+        frame.render_widget(Paragraph::new(help), footer_area);
     }
 }
 
@@ -212,6 +241,8 @@ fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         use crate::domain::models::{format_centavos, TransactionKind};
 
         let currency = app.config.currency.clone();
+        let tsep = app.config.thousands_separator.clone();
+        let dsep = app.config.decimal_separator.clone();
         let block = theme::styled_block(" Recurring Entries ");
 
         if app.recurring_entries.is_empty() {
@@ -251,7 +282,7 @@ fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                         Cell::from(Span::styled(status, status_style)),
                         Cell::from(entry.source.clone()),
                         Cell::from(Span::styled(
-                            format_centavos(entry.amount, &currency),
+                            format_centavos(entry.amount, &currency, &tsep, &dsep),
                             amount_style,
                         )),
                         Cell::from(Span::styled(kind_str, amount_style)),

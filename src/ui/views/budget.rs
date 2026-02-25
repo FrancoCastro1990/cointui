@@ -11,6 +11,8 @@ use crate::ui::theme;
 pub fn draw_budget_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = theme::styled_block(" Budgets ");
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
 
     if app.budget_spending.is_empty() {
         let para = Paragraph::new(Span::styled(
@@ -84,8 +86,8 @@ pub fn draw_budget_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rec
                     "{} ({}) - {} / {}  ({:.0}%)",
                     tag_name,
                     budget.period,
-                    format_centavos(*spent, currency),
-                    format_centavos(limit, currency),
+                    format_centavos(*spent, currency, tsep, dsep),
+                    format_centavos(limit, currency, tsep, dsep),
                     pct_display,
                 ),
                 label_style,

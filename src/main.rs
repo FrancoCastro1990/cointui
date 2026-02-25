@@ -17,6 +17,50 @@ struct Cli {
     /// Path to the config file (default: ~/.config/cointui/config.toml)
     #[arg(short, long)]
     config: Option<std::path::PathBuf>,
+
+    /// Import transactions from a CSV file
+    #[arg(long)]
+    import: Option<std::path::PathBuf>,
+
+    /// Export transactions to a file (CSV or JSON, detected from extension)
+    #[arg(long)]
+    export: Option<std::path::PathBuf>,
+
+    /// Create a database backup (optional path; defaults to timestamped file)
+    #[arg(long)]
+    backup: Option<Option<std::path::PathBuf>>,
+
+    /// Restore database from a backup file
+    #[arg(long)]
+    restore: Option<std::path::PathBuf>,
+
+    /// Export format override (csv or json)
+    #[arg(long)]
+    format: Option<String>,
+
+    /// Add a transaction (provide the source/description)
+    #[arg(long)]
+    add: Option<String>,
+
+    /// Amount for --add (required with --add)
+    #[arg(long)]
+    amount: Option<f64>,
+
+    /// Transaction kind for --add: "income" or "expense" (default: expense)
+    #[arg(long)]
+    kind: Option<String>,
+
+    /// Tag name for --add (default: "Otros" or first available tag)
+    #[arg(long)]
+    tag: Option<String>,
+
+    /// Date for --add in YYYY-MM-DD format (default: today)
+    #[arg(long)]
+    date: Option<String>,
+
+    /// Notes for --add
+    #[arg(long)]
+    notes: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -38,6 +82,30 @@ fn main() -> Result<()> {
     // Seed default tags on a fresh database.
     let tag_repo = TagRepo::new(&db);
     tag_repo.seed_defaults(&config.default_tags)?;
+
+    // Handle CLI subcommands before launching TUI.
+    if let Some(path) = cli.import {
+        return cointui::cli::import::run(path, &db);
+    }
+    if let Some(path) = cli.export {
+        return cointui::cli::export::run(path, &db, cli.format);
+    }
+    if let Some(path) = cli.backup {
+        return cointui::cli::backup::run_backup(path, &db, &config);
+    }
+    if let Some(path) = cli.restore {
+        return cointui::cli::backup::run_restore(path, &config);
+    }
+    if let Some(source) = cli.add {
+        let args = cointui::cli::add::AddArgs {
+            amount: cli.amount,
+            kind: cli.kind,
+            tag: cli.tag,
+            date: cli.date,
+            notes: cli.notes,
+        };
+        return cointui::cli::add::run(source, args, &db, &config);
+    }
 
     let db_path_display = db_path.display().to_string();
 
@@ -69,7 +137,7 @@ fn main() -> Result<()> {
             .draw(|frame| {
                 ui::draw(frame, &mut app);
             })
-            .map_err(|e| cointui::error::AppError::Io(e))?;
+            .map_err(cointui::error::AppError::Io)?;
 
         // Poll for the next event.
         match events.next()? {

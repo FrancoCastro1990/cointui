@@ -13,6 +13,8 @@ pub fn draw_dashboard_header(frame: &mut Frame, app: &App, area: ratatui::layout
         Layout::horizontal([Constraint::Ratio(1, 3); 3]).areas(area);
 
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
     let (total_income, total_expense) = app.totals;
     let balance = total_income - total_expense;
 
@@ -22,7 +24,7 @@ pub fn draw_dashboard_header(frame: &mut Frame, app: &App, area: ratatui::layout
         .title_style(theme::income_style().add_modifier(Modifier::BOLD))
         .border_style(Style::default().fg(theme::GREEN));
     let income_text = Paragraph::new(Line::from(Span::styled(
-        format_centavos(total_income, currency),
+        format_centavos(total_income, currency, tsep, dsep),
         theme::income_style().add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center)
@@ -40,7 +42,7 @@ pub fn draw_dashboard_header(frame: &mut Frame, app: &App, area: ratatui::layout
         .title_style(theme::header_style())
         .border_style(Style::default().fg(theme::ACCENT));
     let balance_text = Paragraph::new(Line::from(Span::styled(
-        format_centavos(balance, currency),
+        format_centavos(balance, currency, tsep, dsep),
         balance_style.add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center)
@@ -53,7 +55,7 @@ pub fn draw_dashboard_header(frame: &mut Frame, app: &App, area: ratatui::layout
         .title_style(theme::expense_style().add_modifier(Modifier::BOLD))
         .border_style(Style::default().fg(theme::RED));
     let expense_text = Paragraph::new(Line::from(Span::styled(
-        format_centavos(total_expense, currency),
+        format_centavos(total_expense, currency, tsep, dsep),
         theme::expense_style().add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center)
@@ -63,6 +65,8 @@ pub fn draw_dashboard_header(frame: &mut Frame, app: &App, area: ratatui::layout
 
 pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
     let block = theme::styled_block(" Recent Transactions ");
 
     let header = Row::new(vec!["Date", "Source", "Amount", "Type", "Tag"])
@@ -91,7 +95,7 @@ pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout
                 Cell::from(tx.date.format("%Y-%m-%d").to_string()),
                 Cell::from(tx.source.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(tx.amount, currency),
+                    format_centavos(tx.amount, currency, tsep, dsep),
                     amount_style,
                 )),
                 Cell::from(Span::styled(kind_str, amount_style)),
@@ -120,6 +124,8 @@ pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout
 pub fn draw_dashboard_alerts(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = theme::styled_block(" Budget Alerts ");
     let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
 
     let mut alerts: Vec<Line> = Vec::new();
 
@@ -142,8 +148,8 @@ pub fn draw_dashboard_alerts(frame: &mut Frame, app: &App, area: ratatui::layout
             let msg = format!(
                 "{}: {} / {} ({:.0}%) - {}",
                 tag_name,
-                format_centavos(*spent, currency),
-                format_centavos(limit, currency),
+                format_centavos(*spent, currency, tsep, dsep),
+                format_centavos(limit, currency, tsep, dsep),
                 pct,
                 budget.period,
             );

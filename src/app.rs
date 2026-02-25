@@ -13,6 +13,7 @@ use crate::domain::models::{
     Budget, BudgetPeriod, RecurringEntry, RecurringInterval, Tag, Transaction,
 };
 use crate::error::Result;
+use crate::ui::views::filter_form::FilterForm;
 use crate::ui::views::form::TransactionForm;
 
 /// Which top-level view is displayed.
@@ -36,8 +37,27 @@ pub enum Mode {
     Editing,
     /// Waiting for user to confirm an action.  The string is the prompt message.
     Confirming(String),
-    /// Text filter input mode in the transactions view.
-    Filtering(String),
+    /// Advanced filter form is open.
+    Filtering,
+    /// Help overlay is displayed.
+    Help,
+}
+
+/// Column by which the transaction table can be sorted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Date,
+    Source,
+    Amount,
+    Kind,
+    Tag,
+}
+
+/// Direction of sort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
 }
 
 /// Pending action to execute after confirmation.
@@ -80,8 +100,15 @@ pub struct App {
     // Form state (used for Adding / Editing modes).
     pub form: Option<TransactionForm>,
 
+    // Filter form state (used for Filtering mode).
+    pub filter_form: Option<FilterForm>,
+
     // Pending confirmation action.
     pub pending_action: Option<PendingAction>,
+
+    // Sort state for transactions view.
+    pub sort_column: SortColumn,
+    pub sort_direction: SortDirection,
 
     // Whether the app should quit.
     pub should_quit: bool,
@@ -109,7 +136,10 @@ impl App {
             status_message: None,
             filter: TransactionFilter::default(),
             form: None,
+            filter_form: None,
             pending_action: None,
+            sort_column: SortColumn::Date,
+            sort_direction: SortDirection::Descending,
             should_quit: false,
         };
         app.reload_all()?;
@@ -219,11 +249,38 @@ impl App {
 
     /// Clear the status message if it has expired (3 seconds).
     pub fn tick_status(&mut self) {
-        if let Some((_, instant)) = &self.status_message {
-            if instant.elapsed().as_secs() >= 3 {
+        if let Some((_, instant)) = &self.status_message
+            && instant.elapsed().as_secs() >= 3 {
                 self.status_message = None;
             }
-        }
+    }
+
+    pub fn apply_sort(&mut self) {
+        let col = self.sort_column;
+        let dir = self.sort_direction;
+        // Build a tag name lookup to avoid borrowing self inside the closure.
+        let tag_map: std::collections::HashMap<i64, String> = self
+            .tags
+            .iter()
+            .filter_map(|t| t.id.map(|id| (id, t.name.to_lowercase())))
+            .collect();
+        self.transactions.sort_by(|a, b| {
+            let cmp = match col {
+                SortColumn::Date => a.date.cmp(&b.date),
+                SortColumn::Source => a.source.to_lowercase().cmp(&b.source.to_lowercase()),
+                SortColumn::Amount => a.amount.cmp(&b.amount),
+                SortColumn::Kind => a.kind.to_string().cmp(&b.kind.to_string()),
+                SortColumn::Tag => {
+                    let a_name = tag_map.get(&a.tag_id).cloned().unwrap_or_default();
+                    let b_name = tag_map.get(&b.tag_id).cloned().unwrap_or_default();
+                    a_name.cmp(&b_name)
+                }
+            };
+            match dir {
+                SortDirection::Ascending => cmp,
+                SortDirection::Descending => cmp.reverse(),
+            }
+        });
     }
 
     fn has_active_filter(&self) -> bool {
@@ -257,7 +314,8 @@ impl App {
         match &self.mode {
             Mode::Confirming(_) => self.handle_confirm_key(key),
             Mode::Adding | Mode::Editing => self.handle_form_key(key),
-            Mode::Filtering(_) => self.handle_filter_key(key),
+            Mode::Filtering => self.handle_filter_form_key(key),
+            Mode::Help => self.handle_help_key(key),
             Mode::Normal => self.handle_normal_key(key),
         }
     }
@@ -313,6 +371,10 @@ impl App {
                 self.current_view = View::Dashboard;
                 return;
             }
+            KeyCode::Char('?') => {
+                self.mode = Mode::Help;
+                return;
+            }
             _ => {}
         }
 
@@ -366,7 +428,27 @@ impl App {
                 }
             }
             KeyCode::Char('/') => {
-                self.mode = Mode::Filtering(String::new());
+                let (names, ids) = self.tag_names_and_ids();
+                self.filter_form =
+                    Some(FilterForm::from_filter(&self.filter, names, ids));
+                self.mode = Mode::Filtering;
+            }
+            KeyCode::Char('s') => {
+                self.sort_column = match self.sort_column {
+                    SortColumn::Date => SortColumn::Source,
+                    SortColumn::Source => SortColumn::Amount,
+                    SortColumn::Amount => SortColumn::Kind,
+                    SortColumn::Kind => SortColumn::Tag,
+                    SortColumn::Tag => SortColumn::Date,
+                };
+                self.apply_sort();
+            }
+            KeyCode::Char('S') => {
+                self.sort_direction = match self.sort_direction {
+                    SortDirection::Ascending => SortDirection::Descending,
+                    SortDirection::Descending => SortDirection::Ascending,
+                };
+                self.apply_sort();
             }
             KeyCode::Char('c') => {
                 self.filter = TransactionFilter::default();
@@ -404,7 +486,7 @@ impl App {
                 let budget = Budget {
                     id: None,
                     tag_id,
-                    amount: 100_00, // Default $100
+                    amount: 10_000, // Default $100
                     period: BudgetPeriod::Monthly,
                     active: true,
                 };
@@ -449,8 +531,8 @@ impl App {
                 }
             }
             KeyCode::Char(' ') => {
-                if let Some(entry) = self.recurring_entries.get(self.recurring_selected) {
-                    if let Some(id) = entry.id {
+                if let Some(entry) = self.recurring_entries.get(self.recurring_selected)
+                    && let Some(id) = entry.id {
                         let repo = RecurringRepo::new(&self.db);
                         match repo.toggle_active(id) {
                             Ok(()) => {
@@ -463,7 +545,6 @@ impl App {
                             Err(e) => self.set_status(e.user_message()),
                         }
                     }
-                }
             }
             KeyCode::Char('d') => {
                 if let Some(entry) = self.recurring_entries.get(self.recurring_selected) {
@@ -546,40 +627,59 @@ impl App {
         }
     }
 
-    fn handle_filter_key(&mut self, key: KeyEvent) {
-        let input = if let Mode::Filtering(ref s) = self.mode {
-            s.clone()
-        } else {
+    fn handle_filter_form_key(&mut self, key: KeyEvent) {
+        let Some(ref mut form) = self.filter_form else {
+            self.mode = Mode::Normal;
             return;
         };
 
         match key.code {
             KeyCode::Esc => {
+                self.filter_form = None;
                 self.mode = Mode::Normal;
             }
-            KeyCode::Enter => {
-                if input.trim().is_empty() {
-                    self.filter.search = None;
-                } else {
-                    self.filter.search = Some(input.trim().to_string());
+            KeyCode::Tab => {
+                form.next_field();
+            }
+            KeyCode::BackTab => {
+                form.prev_field();
+            }
+            KeyCode::Char(' ') => {
+                let field = form.current_field();
+                match field {
+                    crate::ui::views::filter_form::FilterField::Kind
+                    | crate::ui::views::filter_form::FilterField::Tag => {
+                        form.cycle_option();
+                    }
+                    _ => {
+                        form.type_char(' ');
+                    }
                 }
+            }
+            KeyCode::Enter => {
+                let new_filter = form.to_filter();
+                self.filter = new_filter;
+                self.filter_form = None;
                 self.mode = Mode::Normal;
                 if let Err(e) = self.reload_transactions() {
                     self.set_status(e.user_message());
+                } else {
+                    self.apply_sort();
+                    self.set_status("Filters applied.");
                 }
             }
             KeyCode::Backspace => {
-                let mut s = input;
-                s.pop();
-                self.mode = Mode::Filtering(s);
+                form.backspace();
             }
             KeyCode::Char(c) => {
-                let mut s = input;
-                s.push(c);
-                self.mode = Mode::Filtering(s);
+                form.type_char(c);
             }
             _ => {}
         }
+    }
+
+    fn handle_help_key(&mut self, _key: KeyEvent) {
+        self.mode = Mode::Normal;
     }
 
     // -----------------------------------------------------------------------
@@ -607,8 +707,8 @@ impl App {
                     Ok(_id) => {
                         // If recurring was enabled and this is a new transaction,
                         // also create a recurring entry.
-                        if !is_editing {
-                            if let Some(interval) = interval {
+                        if !is_editing
+                            && let Some(interval) = interval {
                                 let entry = RecurringEntry {
                                     id: None,
                                     source: tx.source.clone(),
@@ -628,7 +728,6 @@ impl App {
                                     ));
                                 }
                             }
-                        }
 
                         self.form = None;
                         self.mode = Mode::Normal;
