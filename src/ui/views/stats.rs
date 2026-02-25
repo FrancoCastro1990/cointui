@@ -461,6 +461,46 @@ fn draw_trends_table(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 // Budgets sub-tab
 // ---------------------------------------------------------------------------
 
+/// Calculate pace projection for a budget.
+/// Returns (projected_total, days_elapsed, total_days).
+fn budget_pace_projection(budget: &crate::domain::models::Budget, spent: i64) -> (i64, u32, u32) {
+    use chrono::{Datelike, Local, NaiveDate};
+    use crate::domain::models::BudgetPeriod;
+
+    let today = Local::now().date_naive();
+
+    let (period_start, period_end) = match budget.period {
+        BudgetPeriod::Weekly => {
+            let weekday = today.weekday().num_days_from_monday();
+            let start = today - chrono::Duration::days(weekday as i64);
+            let end = start + chrono::Duration::days(7);
+            (start, end)
+        }
+        BudgetPeriod::Monthly => {
+            let start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+            let end = if today.month() == 12 {
+                NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap()
+            } else {
+                NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1).unwrap()
+            };
+            (start, end)
+        }
+        BudgetPeriod::Yearly => {
+            let start = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap();
+            let end = NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap();
+            (start, end)
+        }
+    };
+
+    let total_days = (period_end - period_start).num_days() as u32;
+    let days_elapsed = (today - period_start).num_days().max(1) as u32;
+
+    let daily_rate = spent as f64 / days_elapsed as f64;
+    let projected = (daily_rate * total_days as f64).round() as i64;
+
+    (projected, days_elapsed, total_days)
+}
+
 fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let block = theme::styled_block(" Budget Status ");
     let currency = &app.config.currency;
@@ -470,10 +510,7 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if app.budget_spending.is_empty() {
         let para = Paragraph::new(vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "No active budgets.",
-                theme::muted_style(),
-            )),
+            Line::from(Span::styled("No active budgets.", theme::muted_style())),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Create budgets in the ", theme::muted_style()),
@@ -491,18 +528,15 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Count statuses for summary.
     let mut on_track = 0u32;
     let mut warning = 0u32;
     let mut over = 0u32;
 
     let budget_count = app.budget_spending.len();
-    // Each budget: 1 line label + 2 lines gauge = 3 lines.
     let mut constraints: Vec<Constraint> = Vec::new();
     for _ in 0..budget_count {
-        constraints.push(Constraint::Length(3));
+        constraints.push(Constraint::Length(4));
     }
-    // Summary line + fill.
     constraints.push(Constraint::Length(2));
     constraints.push(Constraint::Min(0));
 
@@ -519,16 +553,8 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         };
 
         let limit = budget.amount;
-        let pct = if limit > 0 {
-            (*spent as f64 / limit as f64) * 100.0
-        } else {
-            0.0
-        };
-        let ratio = if limit > 0 {
-            (*spent as f64 / limit as f64).min(1.0)
-        } else {
-            0.0
-        };
+        let pct = if limit > 0 { (*spent as f64 / limit as f64) * 100.0 } else { 0.0 };
+        let ratio = if limit > 0 { (*spent as f64 / limit as f64).min(1.0) } else { 0.0 };
 
         let style = if pct >= 100.0 {
             over += 1;
@@ -541,19 +567,25 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             theme::income_style()
         };
 
-        let [label_area, gauge_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(2)]).areas(rows[i]);
+        let [label_area, gauge_area, pace_area, _spacer] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .areas(rows[i]);
 
         let formatted_spent = format_cents(*spent, currency, tsep, dsep);
         let formatted_limit = format_cents(limit, currency, tsep, dsep);
 
         let label = Line::from(vec![
             Span::styled(
-                format!("  {} ({})", tag_name, budget.period),
+                format!("  \u{25cf} {} ({})", tag_name, budget.period),
                 theme::text_style(),
             ),
             Span::styled(
-                format!("  {} / {}", formatted_spent, formatted_limit),
+                format!("  {} / {}  ({:.0}%)", formatted_spent, formatted_limit, pct),
                 style,
             ),
         ]);
@@ -562,15 +594,33 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let gauge = LineGauge::default()
             .filled_style(style.add_modifier(Modifier::BOLD))
             .unfilled_style(theme::muted_style())
-            .ratio(ratio)
-            .label(Span::styled(
-                format!("{:.0}%", pct),
-                theme::text_style().add_modifier(Modifier::BOLD),
-            ));
+            .ratio(ratio);
         frame.render_widget(gauge, gauge_area);
+
+        // Pace projection
+        let (projected, _days_elapsed, _total_days) = budget_pace_projection(budget, *spent);
+        let formatted_projected = format_cents(projected, currency, tsep, dsep);
+        let pace_style = if projected >= limit {
+            theme::expense_style()
+        } else if projected as f64 >= limit as f64 * 0.8 {
+            theme::warning_style()
+        } else {
+            theme::income_style()
+        };
+        let status_label = if projected >= limit {
+            "\u{26a0} OVER BUDGET"
+        } else {
+            "\u{2713} On track"
+        };
+        let pace_line = Line::from(vec![
+            Span::styled("    \u{23f1} Pace: ", theme::muted_style()),
+            Span::styled(format!("{} projected", formatted_projected), pace_style),
+            Span::styled(format!(" \u{2014} {}", status_label), pace_style),
+        ]);
+        frame.render_widget(Paragraph::new(pace_line), pace_area);
     }
 
-    // Summary line.
+    // Summary line
     let summary_idx = budget_count;
     if summary_idx < rows.len().saturating_sub(1) {
         let summary = Line::from(vec![
@@ -590,12 +640,20 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 // ---------------------------------------------------------------------------
 
 fn draw_stats_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let range_label = format!("{}mo", app.stats_months_range);
+    let m_label = if app.stats_tab == 0 {
+        let period = match app.stats_overview_period {
+            OverviewPeriod::Monthly => "Monthly",
+            OverviewPeriod::Yearly => "Yearly",
+        };
+        format!("period:{} ", period)
+    } else {
+        format!("range:{}mo ", app.stats_months_range)
+    };
     let help = Line::from(vec![
         Span::styled(" [h/l]", theme::header_style()),
         Span::styled("tab ", theme::text_style()),
         Span::styled("[m]", theme::header_style()),
-        Span::styled(format!("range:{} ", range_label), theme::text_style()),
+        Span::styled(m_label, theme::text_style()),
         Span::styled("[1-6]", theme::header_style()),
         Span::styled("view ", theme::text_style()),
         Span::styled("[?]", theme::header_style()),
