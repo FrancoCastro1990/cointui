@@ -12,7 +12,7 @@ CoinTUI is a terminal-based personal finance manager built with Rust, Ratatui 0.
 cargo check                        # Fast compilation check
 cargo build                        # Debug build
 cargo build --release              # Release build
-cargo test                         # Run all tests (60 unit + integration)
+cargo test                         # Run all tests (62 unit + integration)
 cargo test test_name               # Run a single test by name
 cargo test module::tests           # Run tests in a specific module (e.g. cargo test cli::add::tests)
 cargo clippy                       # Lint (must pass with zero warnings)
@@ -42,7 +42,8 @@ cargo run -- --help                # Show CLI help
 - `TagForm` - Tag add/edit form state (defined in `ui/views/tags.rs`)
 - `TagDeleteInfo` - Tag delete modal state with reassignment (defined in `ui/views/tags.rs`)
 - `SortColumn` / `SortDirection` - Transaction table sorting state
-- Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets), `stats_months_range` (6/12/24)
+- `OverviewPeriod` enum - `Monthly | Yearly` for Stats Overview time filter
+- Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets), `stats_months_range` (6/12/24), `stats_overview_period`, `overview_totals`, `overview_prev_totals`, `overview_expense_by_tag`
 
 ### Data flow
 
@@ -80,6 +81,8 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - Popups render `Clear` widget first, then the popup content on top
 - Only filter `KeyEventKind::Press` events (crossterm sends Press + Release)
 - Views with sub-tabs (Stats) use `Tabs` widget + match on tab index to route to sub-draw functions
+- Stats uses `BarChart::grouped` (via fold pattern), `LineGauge`, and Unicode bar chars for visualizations
+- Stats Overview reads from `overview_totals`/`overview_expense_by_tag` (period-scoped), not `totals`/`expense_by_tag` (all-time)
 - Dashboard uses a separate `dashboard_transactions` cache (always 10 most recent, unfiltered) to avoid showing filtered results
 
 ### Config
@@ -114,7 +117,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 ### Tests
 - DB tests use `Database::in_memory()` for isolated in-memory SQLite
 - Tag repos must seed at least one tag before creating transactions (FK constraint)
-- Run `cargo test` before committing — all 60 tests must pass
+- Run `cargo test` before committing — all 62 tests must pass
 - Test files live alongside source in `#[cfg(test)] mod tests` blocks
 
 ## Pending work (Roadmap)
