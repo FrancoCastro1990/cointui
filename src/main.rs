@@ -12,70 +12,139 @@ use cointui::ui;
 
 /// CoinTUI - Terminal-based personal finance manager
 #[derive(Parser, Debug)]
-#[command(name = "cointui", version, about)]
+#[command(
+    name = "cointui",
+    version,
+    about,
+    long_about = "CoinTUI - Terminal-based personal finance manager\n\n\
+        Manage your personal finances from the terminal. Launch without flags\n\
+        to start the interactive TUI, or use flags for quick CLI operations.",
+    after_long_help = "\
+EXAMPLES:
+    Add an expense (minimal):
+        cointui --add \"Coffee\" --amount 3500
+
+    Add an income with all options:
+        cointui --add \"Salary\" --amount 1500000 --kind income --tag Salary --date 2026-01-15
+
+    Import transactions from CSV:
+        cointui --import transactions.csv
+
+    Export to JSON:
+        cointui --export data.json
+        cointui --export data.txt --format json
+
+    Backup and restore:
+        cointui --backup
+        cointui --backup my-backup.db
+        cointui --restore my-backup.db
+
+    Manage tags:
+        cointui --tags
+        cointui --add-tag \"Food\"
+        cointui --rename-tag \"Food:Groceries\"
+        cointui --delete-tag \"Groceries\"
+
+FORMATS:
+    Export: CSV (.csv) or JSON (.json), detected from extension or --format
+    Import: CSV with headers; interactive column mapping prompts on run
+    Dates:  YYYY-MM-DD (e.g., 2026-01-15)
+    Amount: Whole currency units as number (e.g., 3500 for $3.500)"
+)]
 struct Cli {
     /// Path to the config file (default: ~/.config/cointui/config.toml)
     #[arg(short, long)]
     config: Option<std::path::PathBuf>,
 
-    /// Import transactions from a CSV file
-    #[arg(long)]
-    import: Option<std::path::PathBuf>,
-
-    /// Export transactions to a file (CSV or JSON, detected from extension)
-    #[arg(long)]
-    export: Option<std::path::PathBuf>,
-
-    /// Create a database backup (optional path; defaults to timestamped file)
-    #[arg(long)]
-    backup: Option<Option<std::path::PathBuf>>,
-
-    /// Restore database from a backup file
-    #[arg(long)]
-    restore: Option<std::path::PathBuf>,
-
-    /// Export format override (csv or json)
-    #[arg(long)]
-    format: Option<String>,
+    // -- Transaction --
 
     /// Add a transaction (provide the source/description)
-    #[arg(long)]
+    #[arg(long, help_heading = "Transaction",
+        long_help = "Add a transaction with the given source/description.\n\
+            Requires --amount. Optional: --kind, --tag, --date, --notes.\n\
+            Defaults: kind=expense, tag=first available, date=today.")]
     add: Option<String>,
 
     /// Amount for --add (required with --add)
-    #[arg(long)]
+    #[arg(long, help_heading = "Transaction",
+        long_help = "Amount in whole currency units (e.g., 3500 for $3.500).\n\
+            Required when using --add.")]
     amount: Option<f64>,
 
     /// Transaction kind for --add: "income" or "expense" (default: expense)
-    #[arg(long)]
+    #[arg(long, help_heading = "Transaction",
+        long_help = "Transaction kind: \"income\" or \"expense\".\n\
+            Defaults to \"expense\" if omitted.")]
     kind: Option<String>,
 
-    /// Tag name for --add (default: "Otros" or first available tag)
-    #[arg(long)]
+    /// Tag name for --add (default: first available tag)
+    #[arg(long, help_heading = "Transaction")]
     tag: Option<String>,
 
     /// Date for --add in YYYY-MM-DD format (default: today)
-    #[arg(long)]
+    #[arg(long, help_heading = "Transaction",
+        long_help = "Date in YYYY-MM-DD format (e.g., 2026-01-15).\n\
+            Defaults to today if omitted.")]
     date: Option<String>,
 
     /// Notes for --add
-    #[arg(long)]
+    #[arg(long, help_heading = "Transaction")]
     notes: Option<String>,
 
+    // -- Import / Export --
+
+    /// Import transactions from a CSV file
+    #[arg(long, help_heading = "Import / Export",
+        long_help = "Import transactions from a CSV file.\n\
+            The CSV must have headers. An interactive prompt will guide\n\
+            you through mapping columns to transaction fields.")]
+    import: Option<std::path::PathBuf>,
+
+    /// Export transactions to a file (CSV or JSON, detected from extension)
+    #[arg(long, help_heading = "Import / Export",
+        long_help = "Export transactions to a file.\n\
+            Format is auto-detected from extension (.csv or .json).\n\
+            Use --format to override.")]
+    export: Option<std::path::PathBuf>,
+
+    /// Export format override (csv or json)
+    #[arg(long, help_heading = "Import / Export")]
+    format: Option<String>,
+
+    // -- Backup --
+
+    /// Create a database backup (optional path; defaults to timestamped file)
+    #[arg(long, help_heading = "Backup",
+        long_help = "Create a database backup.\n\
+            If no path is given, saves a timestamped file to\n\
+            ~/.local/share/cointui/backups/.")]
+    backup: Option<Option<std::path::PathBuf>>,
+
+    /// Restore database from a backup file
+    #[arg(long, help_heading = "Backup")]
+    restore: Option<std::path::PathBuf>,
+
+    // -- Tags --
+
     /// List all tags
-    #[arg(long)]
+    #[arg(long, help_heading = "Tags")]
     tags: bool,
 
     /// Add a new tag
-    #[arg(long)]
+    #[arg(long, help_heading = "Tags")]
     add_tag: Option<String>,
 
     /// Rename a tag ("OldName:NewName")
-    #[arg(long)]
+    #[arg(long, help_heading = "Tags",
+        long_help = "Rename a tag using the format \"OldName:NewName\".\n\
+            Example: --rename-tag \"Food:Groceries\"")]
     rename_tag: Option<String>,
 
     /// Delete a tag (must have no transactions or recurring entries)
-    #[arg(long)]
+    #[arg(long, help_heading = "Tags",
+        long_help = "Delete a tag by name.\n\
+            Fails if any transactions or recurring entries reference the tag.\n\
+            Reassign them first or delete them before removing the tag.")]
     delete_tag: Option<String>,
 }
 
