@@ -90,11 +90,11 @@ impl FilterForm {
             kind_option,
             min_amount: filter
                 .min_amount
-                .map(|a| format!("{:.2}", a as f64 / 100.0))
+                .map(|a| a.to_string())
                 .unwrap_or_default(),
             max_amount: filter
                 .max_amount
-                .map(|a| format!("{:.2}", a as f64 / 100.0))
+                .map(|a| a.to_string())
                 .unwrap_or_default(),
             field_index: 0,
             tag_names,
@@ -218,7 +218,7 @@ impl FilterForm {
         if val < 0.0 {
             return None;
         }
-        Some((val * 100.0).round() as i64)
+        Some(val.round() as i64)
     }
 }
 

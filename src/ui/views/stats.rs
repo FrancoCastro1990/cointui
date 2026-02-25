@@ -28,7 +28,7 @@ pub fn draw_expense_chart(frame: &mut Frame, app: &App, area: ratatui::layout::R
         .map(|(tag_id, amount)| {
             let name = app.tag_name(*tag_id);
             // Convert cents to whole units for the bar chart.
-            let value = (*amount / 100) as u64;
+            let value = *amount as u64;
             Bar::default()
                 .label(Line::from(name))
                 .value(value)

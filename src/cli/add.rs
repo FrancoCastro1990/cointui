@@ -52,7 +52,7 @@ pub fn run(
     let amount_f64 = args.amount.ok_or_else(|| {
         AppError::Validation("--amount is required when using --add.".into())
     })?;
-    let amount_cents = (amount_f64 * 100.0).round() as i64;
+    let amount_cents = amount_f64.round() as i64;
 
     // 2. Parse kind (default: expense).
     let kind = match args.kind {
@@ -143,7 +143,7 @@ mod tests {
         run(
             "Supermercado".into(),
             AddArgs {
-                amount: Some(50.00),
+                amount: Some(50000.0),
                 kind: Some("expense".into()),
                 tag: Some("Comida".into()),
                 date: Some("2026-02-25".into()),
@@ -157,7 +157,7 @@ mod tests {
         let txs = TransactionRepo::new(&db).get_all().unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].source, "Supermercado");
-        assert_eq!(txs[0].amount, 5000);
+        assert_eq!(txs[0].amount, 50000);
         assert_eq!(txs[0].kind, TransactionKind::Expense);
         assert_eq!(txs[0].tag_id, 2); // Comida
         assert_eq!(
@@ -175,7 +175,7 @@ mod tests {
         run(
             "Coffee".into(),
             AddArgs {
-                amount: Some(3.50),
+                amount: Some(3500.0),
                 kind: None,
                 tag: None,
                 date: None,
@@ -189,7 +189,7 @@ mod tests {
         let txs = TransactionRepo::new(&db).get_all().unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].kind, TransactionKind::Expense);
-        assert_eq!(txs[0].amount, 350);
+        assert_eq!(txs[0].amount, 3500);
         assert_eq!(txs[0].tag_id, 1); // Otros (default)
         assert_eq!(txs[0].date, Local::now().date_naive());
     }

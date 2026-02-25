@@ -185,14 +185,14 @@ fn parse_record(
 
     let (kind, amount) = if mapping.negative_is_expense {
         if amount_f64 < 0.0 {
-            (TransactionKind::Expense, (-amount_f64 * 100.0).round() as i64)
+            (TransactionKind::Expense, (-amount_f64).round() as i64)
         } else {
-            (TransactionKind::Income, (amount_f64 * 100.0).round() as i64)
+            (TransactionKind::Income, amount_f64.round() as i64)
         }
     } else {
         (
             TransactionKind::Expense,
-            (amount_f64.abs() * 100.0).round() as i64,
+            amount_f64.abs().round() as i64,
         )
     };
 

@@ -85,7 +85,7 @@ impl TransactionForm {
         Self {
             editing_id: tx.id,
             source: tx.source.clone(),
-            amount: format!("{:.2}", tx.amount as f64 / 100.0),
+            amount: tx.amount.to_string(),
             date: tx.date.format("%Y-%m-%d").to_string(),
             kind: tx.kind,
             selected_tag_index,
@@ -264,7 +264,7 @@ impl TransactionForm {
         if val < 0.0 {
             return None;
         }
-        Some((val * 100.0).round() as i64)
+        Some(val.round() as i64)
     }
 
     /// Get the interval if recurring is enabled.

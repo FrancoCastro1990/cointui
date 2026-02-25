@@ -38,7 +38,7 @@ pub fn run(path: PathBuf, db: &Database, format: Option<String>) -> Result<()> {
         .map(|tx| ExportTransaction {
             date: tx.date.format("%Y-%m-%d").to_string(),
             source: tx.source.clone(),
-            amount: format!("{:.2}", tx.amount as f64 / 100.0),
+            amount: tx.amount.to_string(),
             kind: match tx.kind {
                 TransactionKind::Income => "income".into(),
                 TransactionKind::Expense => "expense".into(),

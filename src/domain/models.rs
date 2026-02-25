@@ -45,14 +45,13 @@ impl FromStr for TransactionKind {
 
 /// A single financial transaction.
 ///
-/// `amount` is stored in **cents** (1/100 of the currency unit) to avoid
-/// floating-point rounding issues.
+/// `amount` is stored as whole currency units (e.g. pesos, dollars).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: Option<i64>,
     /// A human-readable label such as "Mercadona" or "Nómina febrero".
     pub source: String,
-    /// Amount in cents. Always positive; `kind` indicates direction.
+    /// Amount in whole currency units. Always positive; `kind` indicates direction.
     pub amount: i64,
     pub kind: TransactionKind,
     pub tag_id: i64,
@@ -124,7 +123,7 @@ pub struct Budget {
     pub id: Option<i64>,
     /// `None` means the budget applies globally (all tags).
     pub tag_id: Option<i64>,
-    /// Maximum amount in cents.
+    /// Maximum amount in whole currency units.
     pub amount: i64,
     pub period: BudgetPeriod,
     pub active: bool,
@@ -219,7 +218,7 @@ impl FromStr for RecurringInterval {
 pub struct RecurringEntry {
     pub id: Option<i64>,
     pub source: String,
-    /// Amount in cents.
+    /// Amount in whole currency units.
     pub amount: i64,
     pub kind: TransactionKind,
     pub tag_id: i64,
@@ -239,17 +238,16 @@ impl RecurringEntry {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Format an amount in cents as a human-readable string with thousands
-/// separators and two decimal places, e.g. `"$ 1.234,56"` (Chilean) or
-/// `"$ 1,234.56"` (US).
-pub fn format_cents(cents: i64, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
-    let abs = cents.unsigned_abs();
-    let whole = abs / 100;
-    let frac = abs % 100;
+/// Format an amount as a human-readable string with thousands separators,
+/// e.g. `"$ 2.700.000"` (Chilean) or `"$ 2,700,000"` (US).
+///
+/// Amounts are stored as whole currency units (not cents/centavos).
+pub fn format_cents(amount: i64, currency: &str, thousands_sep: &str, _decimal_sep: &str) -> String {
+    let abs = amount.unsigned_abs();
 
-    // Build the whole part with thousands separators.
-    let whole_str = {
-        let raw = whole.to_string();
+    // Build with thousands separators.
+    let formatted = {
+        let raw = abs.to_string();
         let mut result = String::with_capacity(raw.len() + raw.len() / 3);
         for (i, ch) in raw.chars().rev().enumerate() {
             if i > 0 && i % 3 == 0 {
@@ -260,8 +258,8 @@ pub fn format_cents(cents: i64, currency: &str, thousands_sep: &str, decimal_sep
         result.chars().rev().collect::<String>()
     };
 
-    let sign = if cents < 0 { "-" } else { "" };
-    format!("{sign}{currency} {whole_str}{decimal_sep}{frac:02}")
+    let sign = if amount < 0 { "-" } else { "" };
+    format!("{sign}{currency} {formatted}")
 }
 
 #[cfg(test)]
@@ -269,28 +267,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_cents_chilean() {
-        assert_eq!(format_cents(123456, "$", ".", ","), "$ 1.234,56");
-        assert_eq!(format_cents(50, "$", ".", ","), "$ 0,50");
-        assert_eq!(format_cents(0, "$", ".", ","), "$ 0,00");
-        assert_eq!(format_cents(100, "€", ".", ","), "€ 1,00");
+    fn format_cents_basic() {
+        assert_eq!(format_cents(2700000, "$", ".", ","), "$ 2.700.000");
+        assert_eq!(format_cents(50, "$", ".", ","), "$ 50");
+        assert_eq!(format_cents(0, "$", ".", ","), "$ 0");
+        assert_eq!(format_cents(1000, "€", ".", ","), "€ 1.000");
     }
 
     #[test]
     fn format_cents_us() {
-        assert_eq!(format_cents(123456, "$", ",", "."), "$ 1,234.56");
-        assert_eq!(format_cents(0, "$", ",", "."), "$ 0.00");
+        assert_eq!(format_cents(123456, "$", ",", "."), "$ 123,456");
+        assert_eq!(format_cents(0, "$", ",", "."), "$ 0");
     }
 
     #[test]
     fn format_cents_negative() {
-        assert_eq!(format_cents(-123456, "$", ".", ","), "-$ 1.234,56");
+        assert_eq!(format_cents(-2700000, "$", ".", ","), "-$ 2.700.000");
     }
 
     #[test]
     fn format_cents_large() {
-        assert_eq!(format_cents(270_000_000, "$", ".", ","), "$ 2.700.000,00");
-        assert_eq!(format_cents(100_000_000, "$", ",", "."), "$ 1,000,000.00");
+        assert_eq!(format_cents(2700000, "$", ".", ","), "$ 2.700.000");
+        assert_eq!(format_cents(1000000, "$", ",", "."), "$ 1,000,000");
     }
 
     #[test]
