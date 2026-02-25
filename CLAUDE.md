@@ -12,7 +12,7 @@ CoinTUI is a terminal-based personal finance manager built with Rust, Ratatui 0.
 cargo check                        # Fast compilation check
 cargo build                        # Debug build
 cargo build --release              # Release build
-cargo test                         # Run all tests (47 unit + integration)
+cargo test                         # Run all tests (60 unit + integration)
 cargo test test_name               # Run a single test by name
 cargo test module::tests           # Run tests in a specific module (e.g. cargo test cli::add::tests)
 cargo clippy                       # Lint (must pass with zero warnings)
@@ -24,7 +24,7 @@ cargo run -- --help                # Show CLI help
 
 ### Layers (top to bottom)
 
-1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--import`, `--export`, `--backup`, `--restore`) that run before TUI launch and exit.
+1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`, `--import`, `--export`, `--backup`, `--restore`) that run before TUI launch and exit.
 2. **UI** (`src/ui/`) - Ratatui widgets, views, theme. Renders `&App` state into terminal frames.
 3. **Event** (`src/event.rs`) - `AppCommand` enum + `EventHandler` polling crossterm events.
 4. **App** (`src/app.rs`) - Central state machine. Owns `Database`, dispatches commands, manages cached data.
@@ -34,11 +34,13 @@ cargo run -- --help                # Show CLI help
 ### Key types
 
 - `App` - Central state: current `View`, `Mode`, cached data, selection indices, form state
-- `View` enum - `Dashboard | Transactions | Stats | Budgets | Recurring`
-- `Mode` enum - `Normal | Adding | Editing | Confirming(String) | Filtering(String)`
+- `View` enum - `Dashboard | Transactions | Stats | Budgets | Recurring | Tags`
+- `Mode` enum - `Normal | Adding | Editing | Confirming(String) | Filtering | TagEditing | TagDeleting | Help`
 - `AppCommand` - All possible user actions (defined in `event.rs`)
 - `TransactionForm` - Form state for add/edit (defined in `ui/views/form.rs`)
 - `TransactionFilter` - Dynamic query filters (defined in `db/transaction_repo.rs`)
+- `TagForm` - Tag add/edit form state (defined in `ui/views/tags.rs`)
+- `TagDeleteInfo` - Tag delete modal state with reassignment (defined in `ui/views/tags.rs`)
 
 ### Data flow
 
@@ -53,7 +55,7 @@ CLI commands (`--add`, `--import`, etc.) bypass the event loop entirely — they
 ## Conventions
 
 ### Amounts
-All monetary amounts are stored as **cents** (`i64`). Use `format_cents(amount, currency, thousands_sep, decimal_sep)` from `domain::models` for display. The separators come from `AppConfig` (default: `.` for thousands, `,` for decimal — Chilean format). Never use `f64` for money (only at CLI input boundary, immediately converted via `(f64 * 100.0).round() as i64`).
+All monetary amounts are stored as **whole currency units** (`i64`). Use `format_cents(amount, currency, thousands_sep, decimal_sep)` from `domain::models` for display. The separators come from `AppConfig` (default: `.` for thousands, `,` for decimal — Chilean format). Never use `f64` for money (only at CLI input boundary, immediately converted via `val.round() as i64`).
 
 ### Error handling
 - All fallible operations return `crate::error::Result<T>`
@@ -82,6 +84,7 @@ All monetary amounts are stored as **cents** (`i64`). Use `format_cents(amount, 
 - `AppConfig` uses `directories` crate for XDG paths
 - DB at `~/.local/share/cointui/cointui.db` by default
 - Number format defaults: `thousands_separator = "."`, `decimal_separator = ","` (Chilean). New config fields use `#[serde(default)]` for backward compatibility with existing config files.
+- Tags are managed via CLI (`--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`) or TUI (view 6). Initial seeds are hardcoded as "Other" and "Salary" in `main.rs`.
 
 ### Adding a new view
 1. Add variant to `View` enum in `app.rs`
@@ -107,11 +110,9 @@ All monetary amounts are stored as **cents** (`i64`). Use `format_cents(amount, 
 ### Tests
 - DB tests use `Database::in_memory()` for isolated in-memory SQLite
 - Tag repos must seed at least one tag before creating transactions (FK constraint)
-- Run `cargo test` before committing — all 47 tests must pass
+- Run `cargo test` before committing — all 60 tests must pass
 - Test files live alongside source in `#[cfg(test)] mod tests` blocks
 
 ## Pending work (Roadmap)
 
 - Advanced filtering: date range, amount range, tag filter UI (filter_form.rs exists but not fully wired)
-- Help overlay (`?` key) — `help.rs` exists but not fully wired
-- Sortable transaction table columns

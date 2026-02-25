@@ -13,13 +13,14 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Recurring transactions** — Define recurring entries (daily/weekly/monthly/yearly) that auto-insert on startup
 - **Statistics** — Bar charts by category, monthly trends, income vs. expenses breakdown, and savings rate
 - **Filtering** — Search transactions by text, date range, amount range, kind, and tag
+- **Tag management** — Create, rename, and delete tags from CLI or TUI with safe reassignment when tags are in use
 - **CLI quick-add** — Add transactions directly from the command line without entering the TUI
 - **CSV import** — Import transactions from CSV files with interactive column mapping
 - **CSV/JSON export** — Export all transactions to CSV or JSON format
 - **Database backup/restore** — Create and restore full database backups
 - **Persistent storage** — SQLite database with WAL mode, automatic schema migrations, and safe parameterized queries
 - **Locale-aware formatting** — Configurable thousands/decimal separators (default: Chilean format `$ 2.700.000,00`)
-- **Configurable** — TOML config for currency symbol, number format, default tags, and database path
+- **Configurable** — TOML config for currency symbol, number format, and database path
 
 ## Installation
 
@@ -63,6 +64,22 @@ cointui --add "Supermercado" --amount 50.00 \
 cointui --add "Salario" --amount 3000 --kind income --tag Salario
 ```
 
+### Tag management
+
+```bash
+# List all tags
+cointui --tags
+
+# Add a new tag
+cointui --add-tag "Food"
+
+# Rename a tag
+cointui --rename-tag "Food:Groceries"
+
+# Delete a tag (blocks if transactions or recurring entries reference it)
+cointui --delete-tag "Groceries"
+```
+
 ### Import / Export
 
 ```bash
@@ -98,7 +115,7 @@ cointui --restore /path/to/backup.db
 
 | Key | Action |
 |-----|--------|
-| `1` - `5` | Switch between views |
+| `1` - `6` | Switch between views |
 | `Tab` / `Shift+Tab` | Cycle views |
 | `q` | Quit |
 | `Esc` | Return to Dashboard |
@@ -137,6 +154,16 @@ cointui --restore /path/to/backup.db
 | `Space` | Toggle active/inactive |
 | `d` | Delete entry |
 
+### Tags
+
+| Key | Action |
+|-----|--------|
+| `j` / `Down` | Move selection down |
+| `k` / `Up` | Move selection up |
+| `a` | Add new tag |
+| `e` | Edit selected tag |
+| `d` | Delete selected tag |
+
 ## Views
 
 ### 1. Dashboard
@@ -171,6 +198,10 @@ List of budget rules with gauge progress bars. Color indicators: green (< 60%), 
 
 Manage recurring transaction templates. Toggle active/inactive, view interval and amounts.
 
+### 6. Tags
+
+Manage category tags. Add, rename, and delete tags. When deleting a tag that has transactions or recurring entries, a reassignment modal lets you pick which tag to move them to before deletion.
+
 ## Configuration
 
 Config file location: `~/.config/cointui/config.toml`
@@ -181,16 +212,6 @@ A default config is auto-created on first run:
 currency = "$"
 thousands_separator = "."
 decimal_separator = ","
-default_tags = [
-    "Comida",
-    "Transporte",
-    "Entretenimiento",
-    "Servicios",
-    "Salario",
-    "Salud",
-    "Educación",
-    "Otros",
-]
 ```
 
 ### Options
@@ -200,14 +221,13 @@ default_tags = [
 | `currency` | String | `"$"` | Currency symbol displayed next to amounts |
 | `thousands_separator` | String | `"."` | Thousands grouping separator (e.g. `"."` for `1.000`, `","` for `1,000`) |
 | `decimal_separator` | String | `","` | Decimal separator (e.g. `","` for `1.000,50`, `"."` for `1,000.50`) |
-| `default_tags` | Array | 8 categories | Tags seeded into a fresh database |
 | `db_path` | String | (auto) | Override database file path |
 
 ## Data storage
 
 - **Database**: SQLite at `~/.local/share/cointui/cointui.db`
 - **Config**: TOML at `~/.config/cointui/config.toml`
-- Amounts are stored in **cents** (integer) to avoid floating-point errors
+- Amounts are stored as **whole currency units** (integer) to avoid floating-point errors
 - WAL journal mode enabled for performance
 - Foreign keys enforced
 
@@ -226,6 +246,7 @@ src/
 ├── config.rs            # TOML configuration
 ├── cli/
 │   ├── add.rs           # --add transaction from CLI
+│   ├── tags.rs          # --tags, --add-tag, --rename-tag, --delete-tag
 │   ├── import.rs        # --import CSV with column mapping
 │   ├── export.rs        # --export to CSV/JSON
 │   └── backup.rs        # --backup / --restore
@@ -247,6 +268,7 @@ src/
         ├── stats.rs     # Charts and financial summaries
         ├── budget.rs    # Budget list with progress gauges
         ├── recurring.rs # Recurring entry management
+        ├── tags.rs      # Tag management with add/edit/delete
         └── help.rs      # Help overlay
 ```
 
@@ -271,15 +293,16 @@ src/
 
 ```bash
 cargo check          # Fast compilation check
-cargo test           # Run all tests (47 tests)
+cargo test           # Run all tests (60 tests)
 cargo clippy         # Lint (must pass with zero warnings)
 cargo build --release
 ```
 
 ## Roadmap
 
-- [ ] Help overlay (`?` key)
-- [ ] Sortable columns in transaction table
+- [x] Help overlay (`?` key)
+- [x] Sortable columns in transaction table
+- [x] Tag management (CLI + TUI)
 
 ## License
 
