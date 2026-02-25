@@ -445,21 +445,7 @@ fn draw_dashboard(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn draw_stats(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let [top_area, bottom_area, footer_area] = Layout::vertical([
-        Constraint::Min(10),
-        Constraint::Length(10),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-
-    let [chart_area, summary_area] =
-        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .areas(top_area);
-
-    views::stats::draw_expense_chart(frame, app, chart_area);
-    views::stats::draw_summary(frame, app, summary_area);
-    views::stats::draw_monthly_table(frame, app, bottom_area);
-    views::stats::draw_stats_footer(frame, footer_area);
+    views::stats::draw_stats(frame, app, area);
 }
 
 fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {

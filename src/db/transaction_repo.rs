@@ -64,6 +64,18 @@ impl<'a> TransactionRepo<'a> {
             })
     }
 
+    /// Return the most recent transactions (unfiltered), limited to `limit`.
+    pub fn get_recent(&self, limit: usize) -> Result<Vec<Transaction>> {
+        let mut stmt = self.db.conn().prepare(
+            "SELECT id, source, amount, kind, tag_id, date, notes, created_at, updated_at
+             FROM transactions ORDER BY date DESC, id DESC LIMIT ?1",
+        )?;
+        let txs = stmt
+            .query_map(rusqlite::params![limit as i64], row_to_transaction)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(txs)
+    }
+
     /// Return every transaction ordered by date descending.
     pub fn get_all(&self) -> Result<Vec<Transaction>> {
         let mut stmt = self.db.conn().prepare(

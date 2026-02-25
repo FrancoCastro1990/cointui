@@ -85,6 +85,8 @@ pub struct App {
 
     // Cached data.
     pub transactions: Vec<Transaction>,
+    /// Always holds the 10 most recent unfiltered transactions (for Dashboard).
+    pub dashboard_transactions: Vec<Transaction>,
     pub tags: Vec<Tag>,
     pub budgets: Vec<Budget>,
     pub recurring_entries: Vec<RecurringEntry>,
@@ -92,6 +94,8 @@ pub struct App {
     pub monthly_totals: Vec<(String, i64, i64)>,
     /// (budget, amount_spent) pairs for all active budgets.
     pub budget_spending: Vec<(Budget, i64)>,
+    /// Expense totals by tag_id (always unfiltered).
+    pub expense_by_tag: Vec<(i64, i64)>,
 
     // Selection indices.
     pub tx_selected: usize,
@@ -122,6 +126,10 @@ pub struct App {
     pub sort_column: SortColumn,
     pub sort_direction: SortDirection,
 
+    // Stats sub-tab state.
+    pub stats_tab: usize,
+    pub stats_months_range: usize,
+
     // Whether the app should quit.
     pub should_quit: bool,
 }
@@ -136,12 +144,14 @@ impl App {
             config,
             db_path_display,
             transactions: Vec::new(),
+            dashboard_transactions: Vec::new(),
             tags: Vec::new(),
             budgets: Vec::new(),
             recurring_entries: Vec::new(),
             totals: (0, 0),
             monthly_totals: Vec::new(),
             budget_spending: Vec::new(),
+            expense_by_tag: Vec::new(),
             tx_selected: 0,
             budget_selected: 0,
             recurring_selected: 0,
@@ -155,6 +165,8 @@ impl App {
             pending_action: None,
             sort_column: SortColumn::Date,
             sort_direction: SortDirection::Descending,
+            stats_tab: 0,
+            stats_months_range: 6,
             should_quit: false,
         };
         app.reload_all()?;
@@ -168,11 +180,13 @@ impl App {
     pub fn reload_all(&mut self) -> Result<()> {
         self.reload_tags()?;
         self.reload_transactions()?;
+        self.reload_dashboard_transactions()?;
         self.reload_budgets()?;
         self.reload_recurring()?;
         self.reload_totals()?;
         self.reload_monthly_totals()?;
         self.reload_budget_spending()?;
+        self.reload_expense_by_tag()?;
         Ok(())
     }
 
@@ -189,6 +203,12 @@ impl App {
         } else {
             self.tx_selected = 0;
         }
+        Ok(())
+    }
+
+    pub fn reload_dashboard_transactions(&mut self) -> Result<()> {
+        let repo = TransactionRepo::new(&self.db);
+        self.dashboard_transactions = repo.get_recent(10)?;
         Ok(())
     }
 
@@ -228,7 +248,7 @@ impl App {
 
     pub fn reload_monthly_totals(&mut self) -> Result<()> {
         let repo = TransactionRepo::new(&self.db);
-        self.monthly_totals = repo.get_monthly_totals(6)?;
+        self.monthly_totals = repo.get_monthly_totals(self.stats_months_range as u32)?;
         Ok(())
     }
 
@@ -241,6 +261,21 @@ impl App {
             spending.push((b, spent));
         }
         self.budget_spending = spending;
+        Ok(())
+    }
+
+    pub fn reload_expense_by_tag(&mut self) -> Result<()> {
+        let repo = TransactionRepo::new(&self.db);
+        let all = repo.get_all()?;
+        let mut tag_totals: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+        for tx in &all {
+            if tx.kind == crate::domain::models::TransactionKind::Expense {
+                *tag_totals.entry(tx.tag_id).or_insert(0) += tx.amount;
+            }
+        }
+        let mut sorted: Vec<(i64, i64)> = tag_totals.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        self.expense_by_tag = sorted;
         Ok(())
     }
 
@@ -405,7 +440,7 @@ impl App {
         match self.current_view {
             View::Dashboard => {} // Dashboard only uses global keys.
             View::Transactions => self.handle_transactions_key(key),
-            View::Stats => {}
+            View::Stats => self.handle_stats_key(key),
             View::Budgets => self.handle_budgets_key(key),
             View::Recurring => self.handle_recurring_key(key),
             View::Tags => self.handle_tags_key(key),
@@ -647,6 +682,32 @@ impl App {
                     }
                 } else {
                     self.set_status("No tag selected.");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_stats_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('h') | KeyCode::Left => {
+                if self.stats_tab > 0 {
+                    self.stats_tab -= 1;
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if self.stats_tab < 2 {
+                    self.stats_tab += 1;
+                }
+            }
+            KeyCode::Char('m') => {
+                self.stats_months_range = match self.stats_months_range {
+                    6 => 12,
+                    12 => 24,
+                    _ => 6,
+                };
+                if let Err(e) = self.reload_monthly_totals() {
+                    self.set_status(e.user_message());
                 }
             }
             _ => {}

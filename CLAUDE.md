@@ -41,6 +41,8 @@ cargo run -- --help                # Show CLI help
 - `TransactionFilter` - Dynamic query filters (defined in `db/transaction_repo.rs`)
 - `TagForm` - Tag add/edit form state (defined in `ui/views/tags.rs`)
 - `TagDeleteInfo` - Tag delete modal state with reassignment (defined in `ui/views/tags.rs`)
+- `SortColumn` / `SortDirection` - Transaction table sorting state
+- Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets), `stats_months_range` (6/12/24)
 
 ### Data flow
 
@@ -77,6 +79,8 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - Tables needing selection use `render_stateful_widget` with `TableState`
 - Popups render `Clear` widget first, then the popup content on top
 - Only filter `KeyEventKind::Press` events (crossterm sends Press + Release)
+- Views with sub-tabs (Stats) use `Tabs` widget + match on tab index to route to sub-draw functions
+- Dashboard uses a separate `dashboard_transactions` cache (always 10 most recent, unfiltered) to avoid showing filtered results
 
 ### Config
 - TOML format at `~/.config/cointui/config.toml`

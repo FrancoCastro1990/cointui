@@ -11,7 +11,7 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Hierarchical tags** — Organize transactions with categories and subcategories (e.g., Comida > Restaurantes)
 - **Budgets with alerts** — Set spending limits per category or globally (weekly/monthly/yearly) with visual progress bars and warnings at 80%+ usage
 - **Recurring transactions** — Define recurring entries (daily/weekly/monthly/yearly) that auto-insert on startup
-- **Statistics** — Bar charts by category, monthly trends, income vs. expenses breakdown, and savings rate
+- **Statistics** — Three sub-tabs (Overview, Trends, Budgets) with totals, savings rate gauge, expense breakdown by tag, monthly trends with configurable range (6/12/24 months), and budget status gauges
 - **Filtering** — Search transactions by text, date range, amount range, kind, and tag
 - **Tag management** — Create, rename, and delete tags from CLI or TUI with safe reassignment when tags are in use
 - **CLI quick-add** — Add transactions directly from the command line without entering the TUI
@@ -147,6 +147,14 @@ cointui --restore /path/to/backup.db
 | `a` | Add new budget |
 | `d` | Delete selected budget |
 
+### Stats
+
+| Key | Action |
+|-----|--------|
+| `h` / `Left` | Previous sub-tab |
+| `l` / `Right` | Next sub-tab |
+| `m` | Cycle month range (6 / 12 / 24) |
+
 ### Recurring entries
 
 | Key | Action |
@@ -188,7 +196,11 @@ Full scrollable list with all transactions, filterable by text, date, amount, ki
 
 ### 3. Stats
 
-Bar chart of expenses by category, monthly income/expense table for the last 6 months, total summary with savings rate.
+Three sub-tabs navigable with `h`/`l`:
+
+- **Overview** — Income/Balance/Expenses header, savings rate gauge, and expense breakdown by tag with horizontal bars and percentages
+- **Trends** — Monthly income vs. expenses with line gauges, configurable range (6/12/24 months via `m` key)
+- **Budgets** — Budget progress gauges with on-track/warning/over-budget summary
 
 ### 4. Budgets
 
@@ -303,6 +315,7 @@ cargo build --release
 - [x] Help overlay (`?` key)
 - [x] Sortable columns in transaction table
 - [x] Tag management (CLI + TUI)
+- [x] Stats redesign with sub-tabs (Overview, Trends, Budgets)
 
 ## License
 

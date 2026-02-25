@@ -77,9 +77,8 @@ pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout
         .bottom_margin(1);
 
     let rows: Vec<Row> = app
-        .transactions
+        .dashboard_transactions
         .iter()
-        .take(10)
         .map(|tx| {
             let tag_name = app.tag_name(tx.tag_id);
             let amount_style = match tx.kind {

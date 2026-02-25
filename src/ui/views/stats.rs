@@ -1,43 +1,154 @@
-use ratatui::layout::{Alignment, Constraint};
-use ratatui::style::Modifier;
+use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Block, LineGauge, Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::domain::models::{format_cents, TransactionKind};
+use crate::domain::models::format_cents;
 use crate::ui::theme;
 
-pub fn draw_expense_chart(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let block = theme::styled_block(" Expenses by Tag (Top 5) ");
+/// Sub-tab titles for the Stats view.
+const STATS_TABS: [&str; 3] = ["Overview", "Trends", "Budgets"];
 
-    // Aggregate expenses by tag.
-    let mut tag_totals: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
-    for tx in &app.transactions {
-        if tx.kind == TransactionKind::Expense {
-            *tag_totals.entry(tx.tag_id).or_insert(0) += tx.amount;
-        }
+/// Main entry point: draws sub-tab bar, routes to the active sub-tab, draws footer.
+pub fn draw_stats(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let [tabs_area, content_area, footer_area] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+
+    // Sub-tab bar.
+    let tabs = Tabs::new(STATS_TABS.to_vec())
+        .select(app.stats_tab)
+        .style(theme::muted_style())
+        .highlight_style(theme::header_style().add_modifier(Modifier::UNDERLINED))
+        .divider(" | ");
+    frame.render_widget(tabs, tabs_area);
+
+    // Route to active sub-tab.
+    match app.stats_tab {
+        0 => draw_overview(frame, app, content_area),
+        1 => draw_trends(frame, app, content_area),
+        2 => draw_budgets(frame, app, content_area),
+        _ => draw_overview(frame, app, content_area),
     }
 
-    let mut sorted: Vec<(i64, i64)> = tag_totals.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    sorted.truncate(5);
+    draw_stats_footer(frame, app, footer_area);
+}
 
-    let bars: Vec<Bar> = sorted
-        .iter()
-        .map(|(tag_id, amount)| {
-            let name = app.tag_name(*tag_id);
-            // Convert cents to whole units for the bar chart.
-            let value = *amount as u64;
-            Bar::default()
-                .label(Line::from(name))
-                .value(value)
-                .style(theme::expense_style())
-                .value_style(theme::text_style().add_modifier(Modifier::BOLD))
-        })
-        .collect();
+// ---------------------------------------------------------------------------
+// Overview sub-tab
+// ---------------------------------------------------------------------------
 
-    if bars.is_empty() {
+fn draw_overview(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let [header_area, savings_area, breakdown_area] = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(2),
+        Constraint::Min(3),
+    ])
+    .areas(area);
+
+    draw_totals_header(frame, app, header_area);
+    draw_savings_rate(frame, app, savings_area);
+    draw_expense_breakdown(frame, app, breakdown_area);
+}
+
+fn draw_totals_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let [income_area, balance_area, expense_area] =
+        Layout::horizontal([Constraint::Ratio(1, 3); 3]).areas(area);
+
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
+    let (total_income, total_expense) = app.totals;
+    let balance = total_income - total_expense;
+
+    // Income panel.
+    let income_block = Block::bordered()
+        .title(" INCOME ")
+        .title_style(theme::income_style().add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(theme::GREEN));
+    let income_text = Paragraph::new(Line::from(Span::styled(
+        format_cents(total_income, currency, tsep, dsep),
+        theme::income_style().add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center)
+    .block(income_block);
+    frame.render_widget(income_text, income_area);
+
+    // Balance panel.
+    let balance_style = if balance >= 0 {
+        theme::income_style()
+    } else {
+        theme::expense_style()
+    };
+    let balance_block = Block::bordered()
+        .title(" BALANCE ")
+        .title_style(theme::header_style())
+        .border_style(Style::default().fg(theme::ACCENT));
+    let balance_text = Paragraph::new(Line::from(Span::styled(
+        format_cents(balance, currency, tsep, dsep),
+        balance_style.add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center)
+    .block(balance_block);
+    frame.render_widget(balance_text, balance_area);
+
+    // Expense panel.
+    let expense_block = Block::bordered()
+        .title(" EXPENSES ")
+        .title_style(theme::expense_style().add_modifier(Modifier::BOLD))
+        .border_style(Style::default().fg(theme::RED));
+    let expense_text = Paragraph::new(Line::from(Span::styled(
+        format_cents(total_expense, currency, tsep, dsep),
+        theme::expense_style().add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center)
+    .block(expense_block);
+    frame.render_widget(expense_text, expense_area);
+}
+
+fn draw_savings_rate(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let (total_income, total_expense) = app.totals;
+    let savings_rate = if total_income > 0 {
+        (total_income - total_expense) as f64 / total_income as f64
+    } else {
+        0.0
+    };
+    let pct = savings_rate * 100.0;
+
+    let style = if pct >= 20.0 {
+        theme::income_style()
+    } else if pct >= 0.0 {
+        theme::warning_style()
+    } else {
+        theme::expense_style()
+    };
+
+    let ratio = savings_rate.clamp(0.0, 1.0);
+
+    let gauge = LineGauge::default()
+        .block(Block::default().title(Span::styled(
+            format!("  Savings Rate: {:.1}%", pct),
+            style.add_modifier(Modifier::BOLD),
+        )))
+        .filled_style(style)
+        .unfilled_style(theme::muted_style())
+        .ratio(ratio);
+    frame.render_widget(gauge, area);
+}
+
+fn draw_expense_breakdown(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = theme::styled_block(" Expenses by Tag ");
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
+    let total_expense = app.totals.1;
+
+    if app.expense_by_tag.is_empty() {
         let para = Paragraph::new(Span::styled(
             "No expense data yet.",
             theme::muted_style(),
@@ -48,136 +159,281 @@ pub fn draw_expense_chart(frame: &mut Frame, app: &App, area: ratatui::layout::R
         return;
     }
 
-    let bar_chart = BarChart::default()
-        .block(block)
-        .data(BarGroup::default().bars(&bars))
-        .bar_width(8)
-        .bar_gap(2)
-        .style(theme::text_style());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    frame.render_widget(bar_chart, area);
+    let max_amount = app.expense_by_tag.first().map(|(_, a)| *a).unwrap_or(1).max(1);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (tag_id, amount) in &app.expense_by_tag {
+        let name = app.tag_name(*tag_id);
+        let pct = if total_expense > 0 {
+            (*amount as f64 / total_expense as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let bar_max_width = inner.width.saturating_sub(36) as usize;
+        let bar_len = if max_amount > 0 {
+            ((*amount as f64 / max_amount as f64) * bar_max_width as f64) as usize
+        } else {
+            0
+        };
+
+        let bar = "\u{2588}".repeat(bar_len);
+        let formatted = format_cents(*amount, currency, tsep, dsep);
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<12}", name), theme::text_style()),
+            Span::styled(bar, theme::expense_style()),
+            Span::styled(
+                format!("  {:>12} {:>5.1}%", formatted, pct),
+                theme::text_style(),
+            ),
+        ]));
+    }
+
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, inner);
 }
 
-pub fn draw_summary(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let block = theme::styled_block(" Summary ");
-    let currency = &app.config.currency;
-    let tsep = &app.config.thousands_separator;
-    let dsep = &app.config.decimal_separator;
-    let (total_income, total_expense) = app.totals;
-    let balance = total_income - total_expense;
-    let savings_rate = if total_income > 0 {
-        ((total_income - total_expense) as f64 / total_income as f64) * 100.0
-    } else {
-        0.0
-    };
+// ---------------------------------------------------------------------------
+// Trends sub-tab
+// ---------------------------------------------------------------------------
 
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Total Income:   ", theme::text_style()),
-            Span::styled(
-                format_cents(total_income, currency, tsep, dsep),
-                theme::income_style().add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Total Expenses: ", theme::text_style()),
-            Span::styled(
-                format_cents(total_expense, currency, tsep, dsep),
-                theme::expense_style().add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Balance:        ", theme::text_style()),
-            Span::styled(
-                format_cents(balance, currency, tsep, dsep),
-                if balance >= 0 {
-                    theme::income_style()
-                } else {
-                    theme::expense_style()
-                }
-                .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Savings Rate:   ", theme::text_style()),
-            Span::styled(
-                format!("{:.1}%", savings_rate),
-                if savings_rate >= 20.0 {
-                    theme::income_style()
-                } else if savings_rate >= 0.0 {
-                    theme::warning_style()
-                } else {
-                    theme::expense_style()
-                },
-            ),
-        ]),
-    ];
-
-    let para = Paragraph::new(lines).block(block);
-    frame.render_widget(para, area);
-}
-
-pub fn draw_monthly_table(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let block = theme::styled_block(" Monthly Totals (last 6 months) ");
+fn draw_trends(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let title = format!(
+        " Monthly Breakdown (last {} months) ",
+        app.stats_months_range
+    );
+    let block = theme::styled_block(&title);
     let currency = &app.config.currency;
     let tsep = &app.config.thousands_separator;
     let dsep = &app.config.decimal_separator;
 
-    let header = Row::new(vec!["Month", "Income", "Expenses", "Net"])
-        .style(theme::header_style().add_modifier(Modifier::UNDERLINED))
-        .bottom_margin(1);
-
-    let rows: Vec<Row> = app
-        .monthly_totals
-        .iter()
-        .map(|(month, income, expense)| {
-            let net = income - expense;
-            let net_style = if net >= 0 {
-                theme::income_style()
-            } else {
-                theme::expense_style()
-            };
-            Row::new(vec![
-                Cell::from(month.clone()),
-                Cell::from(Span::styled(
-                    format_cents(*income, currency, tsep, dsep),
-                    theme::income_style(),
-                )),
-                Cell::from(Span::styled(
-                    format_cents(*expense, currency, tsep, dsep),
-                    theme::expense_style(),
-                )),
-                Cell::from(Span::styled(format_cents(net, currency, tsep, dsep), net_style)),
-            ])
-        })
-        .collect();
-
-    let widths = [
-        Constraint::Length(10),
-        Constraint::Length(16),
-        Constraint::Length(16),
-        Constraint::Length(16),
-    ];
-
-    let table = Table::new(rows, widths)
-        .header(header)
+    if app.monthly_totals.is_empty() {
+        let para = Paragraph::new(Span::styled(
+            "No transaction data yet.",
+            theme::muted_style(),
+        ))
         .block(block)
-        .style(theme::text_style())
-        .column_spacing(2);
+        .alignment(Alignment::Center);
+        frame.render_widget(para, area);
+        return;
+    }
 
-    frame.render_widget(table, area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Each month gets 3 lines: data row, gauge row, spacer.
+    let month_count = app.monthly_totals.len();
+    let mut constraints: Vec<Constraint> = Vec::new();
+    for _ in 0..month_count {
+        constraints.push(Constraint::Length(3));
+    }
+    constraints.push(Constraint::Min(0));
+
+    let rows = Layout::vertical(constraints).split(inner);
+
+    for (i, (month, income, expense)) in app.monthly_totals.iter().rev().enumerate() {
+        if i >= rows.len() - 1 {
+            break;
+        }
+
+        let net = income - expense;
+        let ratio = if *income > 0 {
+            *expense as f64 / *income as f64
+        } else if *expense > 0 {
+            1.0
+        } else {
+            0.0
+        };
+        let ratio_pct = ratio * 100.0;
+
+        let net_style = if net >= 0 {
+            theme::income_style()
+        } else {
+            theme::expense_style()
+        };
+
+        let gauge_style = if ratio_pct >= 100.0 {
+            theme::expense_style()
+        } else if ratio_pct >= 80.0 {
+            theme::warning_style()
+        } else {
+            theme::income_style()
+        };
+
+        let [data_area, gauge_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(2)]).areas(rows[i]);
+
+        let formatted_income = format_cents(*income, currency, tsep, dsep);
+        let formatted_expense = format_cents(*expense, currency, tsep, dsep);
+        let formatted_net = format_cents(net, currency, tsep, dsep);
+
+        let data_line = Line::from(vec![
+            Span::styled(format!("  {:<10}", month), theme::header_style()),
+            Span::styled("Inc ", theme::muted_style()),
+            Span::styled(format!("{:>12}", formatted_income), theme::income_style()),
+            Span::styled("  Exp ", theme::muted_style()),
+            Span::styled(format!("{:>12}", formatted_expense), theme::expense_style()),
+            Span::styled("  Net ", theme::muted_style()),
+            Span::styled(format!("{:>12}", formatted_net), net_style),
+            Span::styled(format!("  {:>5.0}%", ratio_pct), gauge_style),
+        ]);
+        frame.render_widget(Paragraph::new(data_line), data_area);
+
+        let gauge = LineGauge::default()
+            .filled_style(gauge_style)
+            .unfilled_style(theme::muted_style())
+            .ratio(ratio.min(1.0));
+        frame.render_widget(gauge, gauge_area);
+    }
 }
 
-pub fn draw_stats_footer(frame: &mut Frame, area: ratatui::layout::Rect) {
+// ---------------------------------------------------------------------------
+// Budgets sub-tab
+// ---------------------------------------------------------------------------
+
+fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = theme::styled_block(" Budget Status ");
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
+
+    if app.budget_spending.is_empty() {
+        let para = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "No active budgets.",
+                theme::muted_style(),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Create budgets in the ", theme::muted_style()),
+                Span::styled("Budgets", theme::header_style()),
+                Span::styled(" view ", theme::muted_style()),
+                Span::styled("[4]", theme::header_style()),
+            ]),
+        ])
+        .block(block)
+        .alignment(Alignment::Center);
+        frame.render_widget(para, area);
+        return;
+    }
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Count statuses for summary.
+    let mut on_track = 0u32;
+    let mut warning = 0u32;
+    let mut over = 0u32;
+
+    let budget_count = app.budget_spending.len();
+    // Each budget: 1 line label + 2 lines gauge = 3 lines.
+    let mut constraints: Vec<Constraint> = Vec::new();
+    for _ in 0..budget_count {
+        constraints.push(Constraint::Length(3));
+    }
+    // Summary line + fill.
+    constraints.push(Constraint::Length(2));
+    constraints.push(Constraint::Min(0));
+
+    let rows = Layout::vertical(constraints).split(inner);
+
+    for (i, (budget, spent)) in app.budget_spending.iter().enumerate() {
+        if i >= rows.len().saturating_sub(2) {
+            break;
+        }
+
+        let tag_name = match budget.tag_id {
+            Some(tid) => app.tag_name(tid),
+            None => "Global".to_string(),
+        };
+
+        let limit = budget.amount;
+        let pct = if limit > 0 {
+            (*spent as f64 / limit as f64) * 100.0
+        } else {
+            0.0
+        };
+        let ratio = if limit > 0 {
+            (*spent as f64 / limit as f64).min(1.0)
+        } else {
+            0.0
+        };
+
+        let style = if pct >= 100.0 {
+            over += 1;
+            theme::expense_style()
+        } else if pct >= 80.0 {
+            warning += 1;
+            theme::warning_style()
+        } else {
+            on_track += 1;
+            theme::income_style()
+        };
+
+        let [label_area, gauge_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(2)]).areas(rows[i]);
+
+        let formatted_spent = format_cents(*spent, currency, tsep, dsep);
+        let formatted_limit = format_cents(limit, currency, tsep, dsep);
+
+        let label = Line::from(vec![
+            Span::styled(
+                format!("  {} ({})", tag_name, budget.period),
+                theme::text_style(),
+            ),
+            Span::styled(
+                format!("  {} / {}", formatted_spent, formatted_limit),
+                style,
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(label), label_area);
+
+        let gauge = LineGauge::default()
+            .filled_style(style.add_modifier(Modifier::BOLD))
+            .unfilled_style(theme::muted_style())
+            .ratio(ratio)
+            .label(Span::styled(
+                format!("{:.0}%", pct),
+                theme::text_style().add_modifier(Modifier::BOLD),
+            ));
+        frame.render_widget(gauge, gauge_area);
+    }
+
+    // Summary line.
+    let summary_idx = budget_count;
+    if summary_idx < rows.len().saturating_sub(1) {
+        let summary = Line::from(vec![
+            Span::styled("  ", theme::text_style()),
+            Span::styled(format!("{on_track} on track"), theme::income_style()),
+            Span::styled("    ", theme::text_style()),
+            Span::styled(format!("{warning} warning"), theme::warning_style()),
+            Span::styled("    ", theme::text_style()),
+            Span::styled(format!("{over} over budget"), theme::expense_style()),
+        ]);
+        frame.render_widget(Paragraph::new(vec![Line::from(""), summary]), rows[summary_idx]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
+fn draw_stats_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let range_label = format!("{}mo", app.stats_months_range);
     let help = Line::from(vec![
-        Span::styled(" [Esc]", theme::header_style()),
-        Span::styled("back ", theme::text_style()),
-        Span::styled("[1-5]", theme::header_style()),
-        Span::styled("switch view ", theme::text_style()),
+        Span::styled(" [h/l]", theme::header_style()),
+        Span::styled("tab ", theme::text_style()),
+        Span::styled("[m]", theme::header_style()),
+        Span::styled(format!("range:{} ", range_label), theme::text_style()),
+        Span::styled("[1-6]", theme::header_style()),
+        Span::styled("view ", theme::text_style()),
+        Span::styled("[?]", theme::header_style()),
+        Span::styled("help", theme::text_style()),
     ]);
     frame.render_widget(Paragraph::new(help), area);
 }
