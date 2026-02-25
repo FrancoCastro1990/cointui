@@ -1,10 +1,11 @@
+use chrono::{Datelike, Local};
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, LineGauge, Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, OverviewPeriod};
 use crate::domain::models::format_cents;
 use crate::ui::theme;
 
@@ -44,16 +45,35 @@ pub fn draw_stats(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 // ---------------------------------------------------------------------------
 
 fn draw_overview(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let [header_area, savings_area, breakdown_area] = Layout::vertical([
+    let [period_area, header_area, savings_area, breakdown_area] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(5),
         Constraint::Length(2),
         Constraint::Min(3),
     ])
     .areas(area);
 
+    draw_period_indicator(frame, app, period_area);
     draw_totals_header(frame, app, header_area);
     draw_savings_rate(frame, app, savings_area);
     draw_expense_breakdown(frame, app, breakdown_area);
+}
+
+fn draw_period_indicator(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let today = Local::now().date_naive();
+    let label = match app.stats_overview_period {
+        OverviewPeriod::Monthly => {
+            let month_name = today.format("%B %Y").to_string();
+            format!("  [m] Period: Monthly \u{2014} {}", month_name)
+        }
+        OverviewPeriod::Yearly => {
+            format!("  [m] Period: Yearly \u{2014} {}", today.year())
+        }
+    };
+    let line = Line::from(vec![
+        Span::styled(label, theme::header_style()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn draw_totals_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -63,24 +83,47 @@ fn draw_totals_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
     let currency = &app.config.currency;
     let tsep = &app.config.thousands_separator;
     let dsep = &app.config.decimal_separator;
-    let (total_income, total_expense) = app.totals;
-    let balance = total_income - total_expense;
+    let (cur_income, cur_expense) = app.overview_totals;
+    let (prev_income, prev_expense) = app.overview_prev_totals;
+    let cur_balance = cur_income - cur_expense;
+    let prev_balance = prev_income - prev_expense;
 
-    // Income panel.
+    fn delta_span(current: i64, previous: i64) -> Span<'static> {
+        if previous == 0 {
+            return Span::styled("  \u{2014}", Style::default().fg(theme::MUTED));
+        }
+        let pct = ((current - previous) as f64 / previous.unsigned_abs() as f64) * 100.0;
+        if pct >= 0.0 {
+            Span::styled(
+                format!("  \u{25b2} +{:.1}%", pct),
+                Style::default().fg(theme::GREEN),
+            )
+        } else {
+            Span::styled(
+                format!("  \u{25bc} {:.1}%", pct),
+                Style::default().fg(theme::RED),
+            )
+        }
+    }
+
+    // Income panel
     let income_block = Block::bordered()
         .title(" INCOME ")
         .title_style(theme::income_style().add_modifier(Modifier::BOLD))
         .border_style(Style::default().fg(theme::GREEN));
-    let income_text = Paragraph::new(Line::from(Span::styled(
-        format_cents(total_income, currency, tsep, dsep),
-        theme::income_style().add_modifier(Modifier::BOLD),
-    )))
+    let income_text = Paragraph::new(vec![
+        Line::from(Span::styled(
+            format_cents(cur_income, currency, tsep, dsep),
+            theme::income_style().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(delta_span(cur_income, prev_income)),
+    ])
     .alignment(Alignment::Center)
     .block(income_block);
     frame.render_widget(income_text, income_area);
 
-    // Balance panel.
-    let balance_style = if balance >= 0 {
+    // Balance panel
+    let balance_style = if cur_balance >= 0 {
         theme::income_style()
     } else {
         theme::expense_style()
@@ -89,30 +132,36 @@ fn draw_totals_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect)
         .title(" BALANCE ")
         .title_style(theme::header_style())
         .border_style(Style::default().fg(theme::ACCENT));
-    let balance_text = Paragraph::new(Line::from(Span::styled(
-        format_cents(balance, currency, tsep, dsep),
-        balance_style.add_modifier(Modifier::BOLD),
-    )))
+    let balance_text = Paragraph::new(vec![
+        Line::from(Span::styled(
+            format_cents(cur_balance, currency, tsep, dsep),
+            balance_style.add_modifier(Modifier::BOLD),
+        )),
+        Line::from(delta_span(cur_balance, prev_balance)),
+    ])
     .alignment(Alignment::Center)
     .block(balance_block);
     frame.render_widget(balance_text, balance_area);
 
-    // Expense panel.
+    // Expense panel
     let expense_block = Block::bordered()
         .title(" EXPENSES ")
         .title_style(theme::expense_style().add_modifier(Modifier::BOLD))
         .border_style(Style::default().fg(theme::RED));
-    let expense_text = Paragraph::new(Line::from(Span::styled(
-        format_cents(total_expense, currency, tsep, dsep),
-        theme::expense_style().add_modifier(Modifier::BOLD),
-    )))
+    let expense_text = Paragraph::new(vec![
+        Line::from(Span::styled(
+            format_cents(cur_expense, currency, tsep, dsep),
+            theme::expense_style().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(delta_span(cur_expense, prev_expense)),
+    ])
     .alignment(Alignment::Center)
     .block(expense_block);
     frame.render_widget(expense_text, expense_area);
 }
 
 fn draw_savings_rate(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let (total_income, total_expense) = app.totals;
+    let (total_income, total_expense) = app.overview_totals;
     let savings_rate = if total_income > 0 {
         (total_income - total_expense) as f64 / total_income as f64
     } else {
@@ -146,11 +195,11 @@ fn draw_expense_breakdown(frame: &mut Frame, app: &App, area: ratatui::layout::R
     let currency = &app.config.currency;
     let tsep = &app.config.thousands_separator;
     let dsep = &app.config.decimal_separator;
-    let total_expense = app.totals.1;
+    let total_expense = app.overview_totals.1;
 
-    if app.expense_by_tag.is_empty() {
+    if app.overview_expense_by_tag.is_empty() {
         let para = Paragraph::new(Span::styled(
-            "No expense data yet.",
+            "No expense data for this period.",
             theme::muted_style(),
         ))
         .block(block)
@@ -162,10 +211,10 @@ fn draw_expense_breakdown(frame: &mut Frame, app: &App, area: ratatui::layout::R
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let max_amount = app.expense_by_tag.first().map(|(_, a)| *a).unwrap_or(1).max(1);
+    let max_amount = app.overview_expense_by_tag.first().map(|(_, a)| *a).unwrap_or(1).max(1);
 
     let mut lines: Vec<Line> = Vec::new();
-    for (tag_id, amount) in &app.expense_by_tag {
+    for (tag_id, amount) in &app.overview_expense_by_tag {
         let name = app.tag_name(*tag_id);
         let pct = if total_expense > 0 {
             (*amount as f64 / total_expense as f64) * 100.0
