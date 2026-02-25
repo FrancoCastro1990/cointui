@@ -2,7 +2,7 @@ use chrono::{Datelike, Local};
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, LineGauge, Paragraph, Tabs};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Block, LineGauge, Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::{App, OverviewPeriod};
@@ -252,15 +252,12 @@ fn draw_expense_breakdown(frame: &mut Frame, app: &App, area: ratatui::layout::R
 
 fn draw_trends(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let title = format!(
-        " Monthly Breakdown (last {} months) ",
+        " Income vs Expenses (last {} months) ",
         app.stats_months_range
     );
-    let block = theme::styled_block(&title);
-    let currency = &app.config.currency;
-    let tsep = &app.config.thousands_separator;
-    let dsep = &app.config.decimal_separator;
 
     if app.monthly_totals.is_empty() {
+        let block = theme::styled_block(&title);
         let para = Paragraph::new(Span::styled(
             "No transaction data yet.",
             theme::muted_style(),
@@ -271,33 +268,100 @@ fn draw_trends(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         return;
     }
 
+    // Split: chart top, table bottom
+    let table_rows = app.monthly_totals.len().min(12) as u16 + 4;
+    let [chart_area, table_area] = Layout::vertical([
+        Constraint::Min(8),
+        Constraint::Length(table_rows),
+    ])
+    .areas(area);
+
+    draw_trends_chart(frame, app, chart_area, &title);
+    draw_trends_table(frame, app, table_area);
+}
+
+fn draw_trends_chart(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, title: &str) {
+    let groups: Vec<BarGroup> = app
+        .monthly_totals
+        .iter()
+        .map(|(month, income, expense)| {
+            // Abbreviate: "2026-02" -> "Feb"
+            let label = chrono::NaiveDate::parse_from_str(&format!("{}-01", month), "%Y-%m-%d")
+                .map(|d| d.format("%b").to_string())
+                .unwrap_or_else(|_| month.clone());
+
+            BarGroup::default()
+                .label(Line::from(label))
+                .bars(&[
+                    Bar::default()
+                        .value(*income as u64)
+                        .style(Style::default().fg(theme::GREEN)),
+                    Bar::default()
+                        .value(*expense as u64)
+                        .style(Style::default().fg(theme::RED)),
+                ])
+        })
+        .collect();
+
+    // Adapt bar width to available space
+    let month_count = groups.len() as u16;
+    let available = area.width.saturating_sub(4);
+    let bar_width = if month_count > 0 {
+        let per_group = available / month_count;
+        ((per_group.saturating_sub(3)) / 2).max(1)
+    } else {
+        3
+    };
+
+    let chart = groups
+        .into_iter()
+        .fold(BarChart::default(), |chart, group| chart.data(group))
+        .block(
+            Block::bordered()
+                .title(title.to_string())
+                .title_style(theme::header_style())
+                .border_style(Style::default().fg(theme::BORDER)),
+        )
+        .bar_width(bar_width)
+        .bar_gap(1)
+        .group_gap(2)
+        .bar_style(Style::default().fg(theme::GREEN))
+        .value_style(Style::default().fg(theme::FG).add_modifier(Modifier::BOLD));
+
+    frame.render_widget(chart, area);
+}
+
+fn draw_trends_table(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = theme::styled_block(" Monthly Detail ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Each month gets 3 lines: data row, gauge row, spacer.
-    let month_count = app.monthly_totals.len();
-    let mut constraints: Vec<Constraint> = Vec::new();
-    for _ in 0..month_count {
-        constraints.push(Constraint::Length(3));
-    }
-    constraints.push(Constraint::Min(0));
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
 
-    let rows = Layout::vertical(constraints).split(inner);
+    let mut lines: Vec<Line> = Vec::new();
 
-    for (i, (month, income, expense)) in app.monthly_totals.iter().rev().enumerate() {
-        if i >= rows.len() - 1 {
-            break;
-        }
+    // Header row
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {:<10}", "Month"), theme::header_style()),
+        Span::styled(format!("{:>14}", "Income"), theme::header_style()),
+        Span::styled(format!("{:>14}", "Expense"), theme::header_style()),
+        Span::styled(format!("{:>14}", "Net"), theme::header_style()),
+        Span::styled(format!("{:>10}", "MoM \u{0394}"), theme::header_style()),
+    ]));
 
+    let months: Vec<&(String, i64, i64)> = app.monthly_totals.iter().collect();
+
+    let mut total_income: i64 = 0;
+    let mut total_expense: i64 = 0;
+    let count = months.len();
+
+    // Data rows (most recent first)
+    for (idx, (month, income, expense)) in months.iter().enumerate().rev() {
         let net = income - expense;
-        let ratio = if *income > 0 {
-            *expense as f64 / *income as f64
-        } else if *expense > 0 {
-            1.0
-        } else {
-            0.0
-        };
-        let ratio_pct = ratio * 100.0;
+        total_income += income;
+        total_expense += expense;
 
         let net_style = if net >= 0 {
             theme::income_style()
@@ -305,39 +369,92 @@ fn draw_trends(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             theme::expense_style()
         };
 
-        let gauge_style = if ratio_pct >= 100.0 {
-            theme::expense_style()
-        } else if ratio_pct >= 80.0 {
-            theme::warning_style()
+        let delta_span = if idx > 0 {
+            let (_, prev_inc, prev_exp) = months[idx - 1];
+            let prev_net = prev_inc - prev_exp;
+            if prev_net == 0 {
+                Span::styled(
+                    format!("{:>10}", "\u{2014}"),
+                    Style::default().fg(theme::MUTED),
+                )
+            } else {
+                let pct =
+                    ((net - prev_net) as f64 / prev_net.unsigned_abs() as f64) * 100.0;
+                if pct >= 0.0 {
+                    Span::styled(
+                        format!("{:>8.1}%\u{25b2}", pct),
+                        Style::default().fg(theme::GREEN),
+                    )
+                } else {
+                    Span::styled(
+                        format!("{:>8.1}%\u{25bc}", pct),
+                        Style::default().fg(theme::RED),
+                    )
+                }
+            }
         } else {
-            theme::income_style()
+            Span::styled(
+                format!("{:>10}", "\u{2014}"),
+                Style::default().fg(theme::MUTED),
+            )
         };
 
-        let [data_area, gauge_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(2)]).areas(rows[i]);
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<10}", month), theme::text_style()),
+            Span::styled(
+                format!("{:>14}", format_cents(*income, currency, tsep, dsep)),
+                theme::income_style(),
+            ),
+            Span::styled(
+                format!("{:>14}", format_cents(*expense, currency, tsep, dsep)),
+                theme::expense_style(),
+            ),
+            Span::styled(
+                format!("{:>14}", format_cents(net, currency, tsep, dsep)),
+                net_style,
+            ),
+            delta_span,
+        ]));
 
-        let formatted_income = format_cents(*income, currency, tsep, dsep);
-        let formatted_expense = format_cents(*expense, currency, tsep, dsep);
-        let formatted_net = format_cents(net, currency, tsep, dsep);
-
-        let data_line = Line::from(vec![
-            Span::styled(format!("  {:<10}", month), theme::header_style()),
-            Span::styled("Inc ", theme::muted_style()),
-            Span::styled(format!("{:>12}", formatted_income), theme::income_style()),
-            Span::styled("  Exp ", theme::muted_style()),
-            Span::styled(format!("{:>12}", formatted_expense), theme::expense_style()),
-            Span::styled("  Net ", theme::muted_style()),
-            Span::styled(format!("{:>12}", formatted_net), net_style),
-            Span::styled(format!("  {:>5.0}%", ratio_pct), gauge_style),
-        ]);
-        frame.render_widget(Paragraph::new(data_line), data_area);
-
-        let gauge = LineGauge::default()
-            .filled_style(gauge_style)
-            .unfilled_style(theme::muted_style())
-            .ratio(ratio.min(1.0));
-        frame.render_widget(gauge, gauge_area);
+        if lines.len() >= inner.height as usize {
+            break;
+        }
     }
+
+    // Averages footer
+    if count > 0 {
+        let avg_income = total_income / count as i64;
+        let avg_expense = total_expense / count as i64;
+        let avg_net = avg_income - avg_expense;
+        let avg_net_style = if avg_net >= 0 {
+            theme::income_style()
+        } else {
+            theme::expense_style()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<10}", "Average"),
+                theme::header_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:>14}", format_cents(avg_income, currency, tsep, dsep)),
+                theme::income_style(),
+            ),
+            Span::styled(
+                format!("{:>14}", format_cents(avg_expense, currency, tsep, dsep)),
+                theme::expense_style(),
+            ),
+            Span::styled(
+                format!("{:>14}", format_cents(avg_net, currency, tsep, dsep)),
+                avg_net_style,
+            ),
+            Span::styled(format!("{:>10}", ""), theme::muted_style()),
+        ]));
+    }
+
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, inner);
 }
 
 // ---------------------------------------------------------------------------
