@@ -204,6 +204,40 @@ impl<'a> TransactionRepo<'a> {
         Ok((income, expense))
     }
 
+    /// Return `(total_income, total_expense)` for transactions where
+    /// `date >= start AND date < end`. Date strings are `YYYY-MM-DD`.
+    pub fn get_totals_for_period(&self, start: &str, end: &str) -> Result<(i64, i64)> {
+        let mut stmt = self.db.conn().prepare(
+            "SELECT
+                 COALESCE(SUM(CASE WHEN kind = 'income'  THEN amount ELSE 0 END), 0),
+                 COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount ELSE 0 END), 0)
+             FROM transactions
+             WHERE date >= ?1 AND date < ?2",
+        )?;
+        let (income, expense) = stmt.query_row(rusqlite::params![start, end], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        Ok((income, expense))
+    }
+
+    /// Return expense totals grouped by tag_id for the given date range,
+    /// sorted descending by amount. Date strings are `YYYY-MM-DD`.
+    pub fn get_expense_by_tag_for_period(&self, start: &str, end: &str) -> Result<Vec<(i64, i64)>> {
+        let mut stmt = self.db.conn().prepare(
+            "SELECT tag_id, COALESCE(SUM(amount), 0)
+             FROM transactions
+             WHERE kind = 'expense' AND date >= ?1 AND date < ?2
+             GROUP BY tag_id
+             ORDER BY SUM(amount) DESC",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![start, end], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Return monthly totals for the last `months` months.
     ///
     /// Each element is `(YYYY-MM, total_income, total_expense)`.
@@ -475,5 +509,147 @@ mod tests {
 
         let results = repo.get_by_tag(1).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_get_totals_for_period() {
+        let db = Database::in_memory().unwrap();
+        let tag_repo = TagRepo::new(&db);
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Test".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+        let repo = TransactionRepo::new(&db);
+
+        repo.create(&Transaction {
+            id: None,
+            source: "Jan income".into(),
+            amount: 1000,
+            kind: TransactionKind::Income,
+            tag_id: 1,
+            date: NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        repo.create(&Transaction {
+            id: None,
+            source: "Jan expense".into(),
+            amount: 400,
+            kind: TransactionKind::Expense,
+            tag_id: 1,
+            date: NaiveDate::from_ymd_opt(2026, 1, 20).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        repo.create(&Transaction {
+            id: None,
+            source: "Feb income".into(),
+            amount: 1500,
+            kind: TransactionKind::Income,
+            tag_id: 1,
+            date: NaiveDate::from_ymd_opt(2026, 2, 10).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+
+        let (inc, exp) = repo
+            .get_totals_for_period("2026-01-01", "2026-02-01")
+            .unwrap();
+        assert_eq!(inc, 1000);
+        assert_eq!(exp, 400);
+
+        let (inc, exp) = repo
+            .get_totals_for_period("2026-02-01", "2026-03-01")
+            .unwrap();
+        assert_eq!(inc, 1500);
+        assert_eq!(exp, 0);
+
+        let (inc, exp) = repo
+            .get_totals_for_period("2025-01-01", "2025-02-01")
+            .unwrap();
+        assert_eq!(inc, 0);
+        assert_eq!(exp, 0);
+    }
+
+    #[test]
+    fn test_get_expense_by_tag_for_period() {
+        let db = Database::in_memory().unwrap();
+        let tag_repo = TagRepo::new(&db);
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Food".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Transport".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+        let repo = TransactionRepo::new(&db);
+
+        repo.create(&Transaction {
+            id: None,
+            source: "Lunch".into(),
+            amount: 300,
+            kind: TransactionKind::Expense,
+            tag_id: 1,
+            date: NaiveDate::from_ymd_opt(2026, 1, 10).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        repo.create(&Transaction {
+            id: None,
+            source: "Bus".into(),
+            amount: 100,
+            kind: TransactionKind::Expense,
+            tag_id: 2,
+            date: NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        repo.create(&Transaction {
+            id: None,
+            source: "Salary".into(),
+            amount: 5000,
+            kind: TransactionKind::Income,
+            tag_id: 1,
+            date: NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(),
+            notes: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+
+        let result = repo
+            .get_expense_by_tag_for_period("2026-01-01", "2026-02-01")
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], (1, 300));
+        assert_eq!(result[1], (2, 100));
+
+        let result = repo
+            .get_expense_by_tag_for_period("2025-06-01", "2025-07-01")
+            .unwrap();
+        assert!(result.is_empty());
     }
 }
