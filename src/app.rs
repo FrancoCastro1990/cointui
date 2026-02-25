@@ -75,6 +75,13 @@ pub enum PendingAction {
     DeleteTag(i64),
 }
 
+/// Period filter for the Stats Overview tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverviewPeriod {
+    Monthly,
+    Yearly,
+}
+
 /// Central application state.
 pub struct App {
     pub current_view: View,
@@ -129,6 +136,13 @@ pub struct App {
     // Stats sub-tab state.
     pub stats_tab: usize,
     pub stats_months_range: usize,
+    pub stats_overview_period: OverviewPeriod,
+    /// Period-scoped totals (income, expense) for current period.
+    pub overview_totals: (i64, i64),
+    /// Period-scoped totals (income, expense) for previous period (for delta).
+    pub overview_prev_totals: (i64, i64),
+    /// Expense by tag for the selected overview period.
+    pub overview_expense_by_tag: Vec<(i64, i64)>,
 
     // Whether the app should quit.
     pub should_quit: bool,
@@ -167,6 +181,10 @@ impl App {
             sort_direction: SortDirection::Descending,
             stats_tab: 0,
             stats_months_range: 6,
+            stats_overview_period: OverviewPeriod::Monthly,
+            overview_totals: (0, 0),
+            overview_prev_totals: (0, 0),
+            overview_expense_by_tag: Vec::new(),
             should_quit: false,
         };
         app.reload_all()?;
@@ -187,6 +205,7 @@ impl App {
         self.reload_monthly_totals()?;
         self.reload_budget_spending()?;
         self.reload_expense_by_tag()?;
+        self.reload_overview_data()?;
         Ok(())
     }
 
@@ -276,6 +295,44 @@ impl App {
         let mut sorted: Vec<(i64, i64)> = tag_totals.into_iter().collect();
         sorted.sort_by(|a, b| b.1.cmp(&a.1));
         self.expense_by_tag = sorted;
+        Ok(())
+    }
+
+    pub fn reload_overview_data(&mut self) -> Result<()> {
+        use chrono::{Local, Datelike, NaiveDate};
+
+        let today = Local::now().date_naive();
+        let (cur_start, cur_end, prev_start, prev_end) = match self.stats_overview_period {
+            OverviewPeriod::Monthly => {
+                let cur_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+                let cur_end = if today.month() == 12 {
+                    NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap()
+                } else {
+                    NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1).unwrap()
+                };
+                let prev_end = cur_start;
+                let prev_start = if today.month() == 1 {
+                    NaiveDate::from_ymd_opt(today.year() - 1, 12, 1).unwrap()
+                } else {
+                    NaiveDate::from_ymd_opt(today.year(), today.month() - 1, 1).unwrap()
+                };
+                (cur_start, cur_end, prev_start, prev_end)
+            }
+            OverviewPeriod::Yearly => {
+                let cur_start = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap();
+                let cur_end = NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap();
+                let prev_start = NaiveDate::from_ymd_opt(today.year() - 1, 1, 1).unwrap();
+                let prev_end = cur_start;
+                (cur_start, cur_end, prev_start, prev_end)
+            }
+        };
+
+        let repo = TransactionRepo::new(&self.db);
+        let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+
+        self.overview_totals = repo.get_totals_for_period(&fmt(cur_start), &fmt(cur_end))?;
+        self.overview_prev_totals = repo.get_totals_for_period(&fmt(prev_start), &fmt(prev_end))?;
+        self.overview_expense_by_tag = repo.get_expense_by_tag_for_period(&fmt(cur_start), &fmt(cur_end))?;
         Ok(())
     }
 
@@ -701,13 +758,25 @@ impl App {
                 }
             }
             KeyCode::Char('m') => {
-                self.stats_months_range = match self.stats_months_range {
-                    6 => 12,
-                    12 => 24,
-                    _ => 6,
-                };
-                if let Err(e) = self.reload_monthly_totals() {
-                    self.set_status(e.user_message());
+                if self.stats_tab == 0 {
+                    // Overview: toggle Monthly/Yearly
+                    self.stats_overview_period = match self.stats_overview_period {
+                        OverviewPeriod::Monthly => OverviewPeriod::Yearly,
+                        OverviewPeriod::Yearly => OverviewPeriod::Monthly,
+                    };
+                    if let Err(e) = self.reload_overview_data() {
+                        self.set_status(e.user_message());
+                    }
+                } else {
+                    // Trends/Budgets: cycle months range
+                    self.stats_months_range = match self.stats_months_range {
+                        6 => 12,
+                        12 => 24,
+                        _ => 6,
+                    };
+                    if let Err(e) = self.reload_monthly_totals() {
+                        self.set_status(e.user_message());
+                    }
                 }
             }
             _ => {}
