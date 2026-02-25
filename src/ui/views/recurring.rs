@@ -5,7 +5,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::domain::models::{format_centavos, TransactionKind};
+use crate::domain::models::{format_cents, TransactionKind};
 use crate::ui::theme;
 
 pub fn draw_recurring(frame: &mut Frame, app: &mut App) {
@@ -66,7 +66,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 Cell::from(Span::styled(status, status_style)),
                 Cell::from(entry.source.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(entry.amount, currency, tsep, dsep),
+                    format_cents(entry.amount, currency, tsep, dsep),
                     amount_style,
                 )),
                 Cell::from(Span::styled(kind_str, amount_style)),

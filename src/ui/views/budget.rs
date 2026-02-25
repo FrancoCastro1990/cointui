@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Gauge, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::domain::models::format_centavos;
+use crate::domain::models::format_cents;
 use crate::ui::theme;
 
 pub fn draw_budget_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -86,8 +86,8 @@ pub fn draw_budget_list(frame: &mut Frame, app: &App, area: ratatui::layout::Rec
                     "{} ({}) - {} / {}  ({:.0}%)",
                     tag_name,
                     budget.period,
-                    format_centavos(*spent, currency, tsep, dsep),
-                    format_centavos(limit, currency, tsep, dsep),
+                    format_cents(*spent, currency, tsep, dsep),
+                    format_cents(limit, currency, tsep, dsep),
                     pct_display,
                 ),
                 label_style,

@@ -13,9 +13,9 @@ pub struct TransactionFilter {
     pub tag_id: Option<i64>,
     /// Case-insensitive substring match against `source` and `notes`.
     pub search: Option<String>,
-    /// Minimum amount in centavos (inclusive).
+    /// Minimum amount in cents (inclusive).
     pub min_amount: Option<i64>,
-    /// Maximum amount in centavos (inclusive).
+    /// Maximum amount in cents (inclusive).
     pub max_amount: Option<i64>,
 }
 
@@ -177,7 +177,7 @@ impl<'a> TransactionRepo<'a> {
     }
 
     /// Return `(total_income, total_expense)` across all transactions, both in
-    /// centavos.
+    /// cents.
     pub fn get_totals(&self) -> Result<(i64, i64)> {
         let income: i64 = self.db.conn().query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE kind = 'income'",

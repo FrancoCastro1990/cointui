@@ -53,7 +53,7 @@ CLI commands (`--add`, `--import`, etc.) bypass the event loop entirely — they
 ## Conventions
 
 ### Amounts
-All monetary amounts are stored as **centavos** (`i64`). Use `format_centavos(amount, currency, thousands_sep, decimal_sep)` from `domain::models` for display. The separators come from `AppConfig` (default: `.` for thousands, `,` for decimal — Chilean format). Never use `f64` for money (only at CLI input boundary, immediately converted via `(f64 * 100.0).round() as i64`).
+All monetary amounts are stored as **cents** (`i64`). Use `format_cents(amount, currency, thousands_sep, decimal_sep)` from `domain::models` for display. The separators come from `AppConfig` (default: `.` for thousands, `,` for decimal — Chilean format). Never use `f64` for money (only at CLI input boundary, immediately converted via `(f64 * 100.0).round() as i64`).
 
 ### Error handling
 - All fallible operations return `crate::error::Result<T>`

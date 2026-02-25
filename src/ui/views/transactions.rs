@@ -5,7 +5,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::domain::models::{format_centavos, TransactionKind};
+use crate::domain::models::{format_cents, TransactionKind};
 use crate::ui::theme;
 
 pub fn draw_transactions(frame: &mut Frame, app: &mut App) {
@@ -104,7 +104,7 @@ fn draw_table(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 Cell::from(tx.date.format("%Y-%m-%d").to_string()),
                 Cell::from(tx.source.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(tx.amount, currency, tsep, dsep),
+                    format_cents(tx.amount, currency, tsep, dsep),
                     amount_style,
                 )),
                 Cell::from(Span::styled(kind_str, amount_style)),

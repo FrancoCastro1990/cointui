@@ -207,7 +207,7 @@ default_tags = [
 
 - **Database**: SQLite at `~/.local/share/cointui/cointui.db`
 - **Config**: TOML at `~/.config/cointui/config.toml`
-- Amounts are stored in **centavos** (integer) to avoid floating-point errors
+- Amounts are stored in **cents** (integer) to avoid floating-point errors
 - WAL journal mode enabled for performance
 - Foreign keys enforced
 

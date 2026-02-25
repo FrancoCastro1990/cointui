@@ -5,7 +5,7 @@ use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::domain::models::{format_centavos, TransactionKind};
+use crate::domain::models::{format_cents, TransactionKind};
 use crate::ui::theme;
 
 pub fn draw_expense_chart(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -27,7 +27,7 @@ pub fn draw_expense_chart(frame: &mut Frame, app: &App, area: ratatui::layout::R
         .iter()
         .map(|(tag_id, amount)| {
             let name = app.tag_name(*tag_id);
-            // Convert centavos to whole units for the bar chart.
+            // Convert cents to whole units for the bar chart.
             let value = (*amount / 100) as u64;
             Bar::default()
                 .label(Line::from(name))
@@ -76,7 +76,7 @@ pub fn draw_summary(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(vec![
             Span::styled("  Total Income:   ", theme::text_style()),
             Span::styled(
-                format_centavos(total_income, currency, tsep, dsep),
+                format_cents(total_income, currency, tsep, dsep),
                 theme::income_style().add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -84,7 +84,7 @@ pub fn draw_summary(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(vec![
             Span::styled("  Total Expenses: ", theme::text_style()),
             Span::styled(
-                format_centavos(total_expense, currency, tsep, dsep),
+                format_cents(total_expense, currency, tsep, dsep),
                 theme::expense_style().add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -92,7 +92,7 @@ pub fn draw_summary(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(vec![
             Span::styled("  Balance:        ", theme::text_style()),
             Span::styled(
-                format_centavos(balance, currency, tsep, dsep),
+                format_cents(balance, currency, tsep, dsep),
                 if balance >= 0 {
                     theme::income_style()
                 } else {
@@ -144,14 +144,14 @@ pub fn draw_monthly_table(frame: &mut Frame, app: &App, area: ratatui::layout::R
             Row::new(vec![
                 Cell::from(month.clone()),
                 Cell::from(Span::styled(
-                    format_centavos(*income, currency, tsep, dsep),
+                    format_cents(*income, currency, tsep, dsep),
                     theme::income_style(),
                 )),
                 Cell::from(Span::styled(
-                    format_centavos(*expense, currency, tsep, dsep),
+                    format_cents(*expense, currency, tsep, dsep),
                     theme::expense_style(),
                 )),
-                Cell::from(Span::styled(format_centavos(net, currency, tsep, dsep), net_style)),
+                Cell::from(Span::styled(format_cents(net, currency, tsep, dsep), net_style)),
             ])
         })
         .collect();

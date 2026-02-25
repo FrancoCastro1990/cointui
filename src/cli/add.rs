@@ -4,7 +4,7 @@ use crate::config::AppConfig;
 use crate::db::connection::Database;
 use crate::db::tag_repo::TagRepo;
 use crate::db::transaction_repo::TransactionRepo;
-use crate::domain::models::{format_centavos, Transaction, TransactionKind};
+use crate::domain::models::{format_cents, Transaction, TransactionKind};
 use crate::error::{AppError, Result};
 
 /// Optional arguments for `--add`.
@@ -20,7 +20,7 @@ pub struct AddArgs {
 /// Returns the new transaction id.
 pub fn create_transaction(
     source: String,
-    amount_centavos: i64,
+    amount_cents: i64,
     kind: TransactionKind,
     tag_id: i64,
     date: NaiveDate,
@@ -30,7 +30,7 @@ pub fn create_transaction(
     let tx = Transaction {
         id: None,
         source,
-        amount: amount_centavos,
+        amount: amount_cents,
         kind,
         tag_id,
         date,
@@ -52,7 +52,7 @@ pub fn run(
     let amount_f64 = args.amount.ok_or_else(|| {
         AppError::Validation("--amount is required when using --add.".into())
     })?;
-    let amount_centavos = (amount_f64 * 100.0).round() as i64;
+    let amount_cents = (amount_f64 * 100.0).round() as i64;
 
     // 2. Parse kind (default: expense).
     let kind = match args.kind {
@@ -91,14 +91,14 @@ pub fn run(
     };
 
     // 5. Create the transaction.
-    create_transaction(source.clone(), amount_centavos, kind, tag_id, date, args.notes, db)?;
+    create_transaction(source.clone(), amount_cents, kind, tag_id, date, args.notes, db)?;
 
     // 6. Print confirmation.
     let sign = match kind {
         TransactionKind::Income => "+",
         TransactionKind::Expense => "-",
     };
-    let amount_display = format_centavos(amount_centavos, &config.currency, &config.thousands_separator, &config.decimal_separator);
+    let amount_display = format_cents(amount_cents, &config.currency, &config.thousands_separator, &config.decimal_separator);
     println!(
         "Transaction added: {source} {sign}{amount_display} [{tag_name}] ({date})"
     );

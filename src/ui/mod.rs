@@ -121,7 +121,7 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
     {
         use ratatui::style::Modifier;
         use ratatui::widgets::{Cell, Row, Table, TableState};
-        use crate::domain::models::{format_centavos, TransactionKind};
+        use crate::domain::models::{format_cents, TransactionKind};
 
         let currency = app.config.currency.clone();
         let tsep = app.config.thousands_separator.clone();
@@ -170,7 +170,7 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
                     Cell::from(tx.date.format("%Y-%m-%d").to_string()),
                     Cell::from(tx.source.clone()),
                     Cell::from(Span::styled(
-                        format_centavos(tx.amount, &currency, &tsep, &dsep),
+                        format_cents(tx.amount, &currency, &tsep, &dsep),
                         amount_style,
                     )),
                     Cell::from(Span::styled(kind_str, amount_style)),
@@ -238,7 +238,7 @@ fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     {
         use ratatui::style::Modifier;
         use ratatui::widgets::{Cell, Row, Table, TableState};
-        use crate::domain::models::{format_centavos, TransactionKind};
+        use crate::domain::models::{format_cents, TransactionKind};
 
         let currency = app.config.currency.clone();
         let tsep = app.config.thousands_separator.clone();
@@ -282,7 +282,7 @@ fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                         Cell::from(Span::styled(status, status_style)),
                         Cell::from(entry.source.clone()),
                         Cell::from(Span::styled(
-                            format_centavos(entry.amount, &currency, &tsep, &dsep),
+                            format_cents(entry.amount, &currency, &tsep, &dsep),
                             amount_style,
                         )),
                         Cell::from(Span::styled(kind_str, amount_style)),

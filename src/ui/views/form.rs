@@ -254,7 +254,7 @@ impl TransactionForm {
         })
     }
 
-    /// Parse the amount string to centavos.
+    /// Parse the amount string to cents.
     fn parse_amount(&self) -> Option<i64> {
         let trimmed = self.amount.trim();
         if trimmed.is_empty() {

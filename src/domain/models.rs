@@ -45,14 +45,14 @@ impl FromStr for TransactionKind {
 
 /// A single financial transaction.
 ///
-/// `amount` is stored in **centavos** (1/100 of the currency unit) to avoid
+/// `amount` is stored in **cents** (1/100 of the currency unit) to avoid
 /// floating-point rounding issues.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: Option<i64>,
     /// A human-readable label such as "Mercadona" or "Nómina febrero".
     pub source: String,
-    /// Amount in centavos. Always positive; `kind` indicates direction.
+    /// Amount in cents. Always positive; `kind` indicates direction.
     pub amount: i64,
     pub kind: TransactionKind,
     pub tag_id: i64,
@@ -64,7 +64,7 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn amount_display(&self, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
-        format_centavos(self.amount, currency, thousands_sep, decimal_sep)
+        format_cents(self.amount, currency, thousands_sep, decimal_sep)
     }
 
     /// Signed amount: positive for income, negative for expense.
@@ -124,7 +124,7 @@ pub struct Budget {
     pub id: Option<i64>,
     /// `None` means the budget applies globally (all tags).
     pub tag_id: Option<i64>,
-    /// Maximum amount in centavos.
+    /// Maximum amount in cents.
     pub amount: i64,
     pub period: BudgetPeriod,
     pub active: bool,
@@ -132,7 +132,7 @@ pub struct Budget {
 
 impl Budget {
     pub fn amount_display(&self, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
-        format_centavos(self.amount, currency, thousands_sep, decimal_sep)
+        format_cents(self.amount, currency, thousands_sep, decimal_sep)
     }
 }
 
@@ -219,7 +219,7 @@ impl FromStr for RecurringInterval {
 pub struct RecurringEntry {
     pub id: Option<i64>,
     pub source: String,
-    /// Amount in centavos.
+    /// Amount in cents.
     pub amount: i64,
     pub kind: TransactionKind,
     pub tag_id: i64,
@@ -231,7 +231,7 @@ pub struct RecurringEntry {
 
 impl RecurringEntry {
     pub fn amount_display(&self, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
-        format_centavos(self.amount, currency, thousands_sep, decimal_sep)
+        format_cents(self.amount, currency, thousands_sep, decimal_sep)
     }
 }
 
@@ -239,11 +239,11 @@ impl RecurringEntry {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Format an amount in centavos as a human-readable string with thousands
+/// Format an amount in cents as a human-readable string with thousands
 /// separators and two decimal places, e.g. `"$ 1.234,56"` (Chilean) or
 /// `"$ 1,234.56"` (US).
-pub fn format_centavos(centavos: i64, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
-    let abs = centavos.unsigned_abs();
+pub fn format_cents(cents: i64, currency: &str, thousands_sep: &str, decimal_sep: &str) -> String {
+    let abs = cents.unsigned_abs();
     let whole = abs / 100;
     let frac = abs % 100;
 
@@ -260,7 +260,7 @@ pub fn format_centavos(centavos: i64, currency: &str, thousands_sep: &str, decim
         result.chars().rev().collect::<String>()
     };
 
-    let sign = if centavos < 0 { "-" } else { "" };
+    let sign = if cents < 0 { "-" } else { "" };
     format!("{sign}{currency} {whole_str}{decimal_sep}{frac:02}")
 }
 
@@ -269,28 +269,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_centavos_chilean() {
-        assert_eq!(format_centavos(123456, "$", ".", ","), "$ 1.234,56");
-        assert_eq!(format_centavos(50, "$", ".", ","), "$ 0,50");
-        assert_eq!(format_centavos(0, "$", ".", ","), "$ 0,00");
-        assert_eq!(format_centavos(100, "€", ".", ","), "€ 1,00");
+    fn format_cents_chilean() {
+        assert_eq!(format_cents(123456, "$", ".", ","), "$ 1.234,56");
+        assert_eq!(format_cents(50, "$", ".", ","), "$ 0,50");
+        assert_eq!(format_cents(0, "$", ".", ","), "$ 0,00");
+        assert_eq!(format_cents(100, "€", ".", ","), "€ 1,00");
     }
 
     #[test]
-    fn format_centavos_us() {
-        assert_eq!(format_centavos(123456, "$", ",", "."), "$ 1,234.56");
-        assert_eq!(format_centavos(0, "$", ",", "."), "$ 0.00");
+    fn format_cents_us() {
+        assert_eq!(format_cents(123456, "$", ",", "."), "$ 1,234.56");
+        assert_eq!(format_cents(0, "$", ",", "."), "$ 0.00");
     }
 
     #[test]
-    fn format_centavos_negative() {
-        assert_eq!(format_centavos(-123456, "$", ".", ","), "-$ 1.234,56");
+    fn format_cents_negative() {
+        assert_eq!(format_cents(-123456, "$", ".", ","), "-$ 1.234,56");
     }
 
     #[test]
-    fn format_centavos_large() {
-        assert_eq!(format_centavos(270_000_000, "$", ".", ","), "$ 2.700.000,00");
-        assert_eq!(format_centavos(100_000_000, "$", ",", "."), "$ 1,000,000.00");
+    fn format_cents_large() {
+        assert_eq!(format_cents(270_000_000, "$", ".", ","), "$ 2.700.000,00");
+        assert_eq!(format_cents(100_000_000, "$", ",", "."), "$ 1,000,000.00");
     }
 
     #[test]
