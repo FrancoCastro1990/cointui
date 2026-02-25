@@ -5,4 +5,5 @@ pub mod form;
 pub mod help;
 pub mod recurring;
 pub mod stats;
+pub mod tags;
 pub mod transactions;

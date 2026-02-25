@@ -17,8 +17,6 @@ pub struct AppConfig {
     /// Decimal separator for amount display (e.g. `","` for Chilean, `"."` for US).
     #[serde(default = "default_decimal_separator")]
     pub decimal_separator: String,
-    /// Tags that are seeded into a fresh database.
-    pub default_tags: Vec<String>,
     /// Override for the database file path. When `None` the default XDG data
     /// directory is used (`~/.local/share/cointui/cointui.db`).
     pub db_path: Option<PathBuf>,
@@ -38,16 +36,6 @@ impl Default for AppConfig {
             currency: "$".into(),
             thousands_separator: ".".into(),
             decimal_separator: ",".into(),
-            default_tags: vec![
-                "Comida".into(),
-                "Transporte".into(),
-                "Entretenimiento".into(),
-                "Servicios".into(),
-                "Salario".into(),
-                "Salud".into(),
-                "Educación".into(),
-                "Otros".into(),
-            ],
             db_path: None,
         }
     }
@@ -130,12 +118,11 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn default_config_has_expected_tags() {
+    fn default_config_has_expected_values() {
         let cfg = AppConfig::default();
         assert_eq!(cfg.currency, "$");
-        assert!(cfg.default_tags.contains(&"Comida".to_string()));
-        assert!(cfg.default_tags.contains(&"Otros".to_string()));
-        assert_eq!(cfg.default_tags.len(), 8);
+        assert_eq!(cfg.thousands_separator, ".");
+        assert_eq!(cfg.decimal_separator, ",");
     }
 
     #[test]
@@ -148,7 +135,7 @@ mod tests {
 
         let loaded = AppConfig::load_from(&path).unwrap();
         assert_eq!(loaded.currency, original.currency);
-        assert_eq!(loaded.default_tags, original.default_tags);
+        assert_eq!(loaded.thousands_separator, original.thousands_separator);
     }
 
     #[test]

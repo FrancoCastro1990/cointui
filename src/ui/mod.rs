@@ -10,6 +10,7 @@ use crate::app::{App, Mode, SortColumn, SortDirection, View};
 use crate::ui::views::filter_form::draw_filter_form;
 use crate::ui::views::form::draw_form;
 use crate::ui::views::help::draw_help;
+use crate::ui::views::tags::{draw_tag_delete_modal, draw_tag_form};
 
 /// Main draw function: dispatches to the current view's renderer.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -29,6 +30,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         View::Stats => draw_stats(frame, app, content_area),
         View::Budgets => draw_budgets(frame, app, content_area),
         View::Recurring => draw_recurring_view(frame, app, content_area),
+        View::Tags => views::tags::draw_tags_view(frame, app, content_area),
     }
 
     // Draw the form overlay if in Adding or Editing mode.
@@ -41,6 +43,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if matches!(app.mode, Mode::Filtering)
         && let Some(ref filter_form) = app.filter_form {
             draw_filter_form(frame, filter_form, &app.config.currency);
+        }
+
+    // Draw tag form overlay.
+    if matches!(app.mode, Mode::TagEditing)
+        && let Some(ref form) = app.tag_form {
+            draw_tag_form(frame, form);
+        }
+
+    // Draw tag delete modal overlay.
+    if matches!(app.mode, Mode::TagDeleting)
+        && let Some(ref info) = app.tag_delete_info {
+            draw_tag_delete_modal(frame, info);
         }
 
     // Draw help overlay.
@@ -335,13 +349,14 @@ fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::
 }
 
 fn draw_tabs(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let titles = vec!["Dashboard", "Transactions", "Stats", "Budgets", "Recurring"];
+    let titles = vec!["Dashboard", "Transactions", "Stats", "Budgets", "Recurring", "Tags"];
     let selected = match app.current_view {
         View::Dashboard => 0,
         View::Transactions => 1,
         View::Stats => 2,
         View::Budgets => 3,
         View::Recurring => 4,
+        View::Tags => 5,
     };
 
     let tabs = Tabs::new(titles)

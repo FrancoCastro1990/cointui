@@ -57,7 +57,7 @@ fn key_line<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
 
 fn global_keys() -> Vec<(&'static str, &'static str)> {
     vec![
-        ("1-5", "Switch view"),
+        ("1-6", "Switch view"),
         ("Tab", "Next view"),
         ("Shift+Tab", "Previous view"),
         ("?", "Show this help"),
@@ -96,6 +96,13 @@ fn view_keys(view: View) -> (&'static str, Vec<(&'static str, &'static str)>) {
             ("j/Down", "Move down"),
             ("k/Up", "Move up"),
             ("Space", "Toggle active/inactive"),
+            ("d", "Delete selected"),
+        ]),
+        View::Tags => ("Tags", vec![
+            ("j/Down", "Move down"),
+            ("k/Up", "Move up"),
+            ("a", "Add tag"),
+            ("e", "Edit selected"),
             ("d", "Delete selected"),
         ]),
     }

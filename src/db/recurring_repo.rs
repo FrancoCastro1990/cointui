@@ -131,6 +131,29 @@ impl<'a> RecurringRepo<'a> {
         Ok(())
     }
 
+    /// Return all recurring entries for a specific tag.
+    pub fn get_by_tag(&self, tag_id: i64) -> Result<Vec<RecurringEntry>> {
+        let mut stmt = self.db.conn().prepare(
+            "SELECT id, source, amount, kind, tag_id, interval,
+                    start_date, last_inserted_date, active
+             FROM recurring_entries WHERE tag_id = ?1 ORDER BY id",
+        )?;
+        let entries = stmt
+            .query_map(rusqlite::params![tag_id], row_to_recurring)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// Reassign all recurring entries from one tag to another.
+    /// Returns the number of rows updated.
+    pub fn reassign_tag(&self, old_tag_id: i64, new_tag_id: i64) -> Result<usize> {
+        let affected = self.db.conn().execute(
+            "UPDATE recurring_entries SET tag_id = ?1 WHERE tag_id = ?2",
+            rusqlite::params![new_tag_id, old_tag_id],
+        )?;
+        Ok(affected)
+    }
+
     /// Toggle the `active` flag on a recurring entry.
     pub fn toggle_active(&self, id: i64) -> Result<()> {
         let affected = self.db.conn().execute(
@@ -292,6 +315,57 @@ mod tests {
 
         repo.toggle_active(id).unwrap();
         assert!(repo.get_by_id(id).unwrap().active);
+    }
+
+    #[test]
+    fn get_by_tag() {
+        let db = setup();
+        let tag_repo = TagRepo::new(&db);
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Other".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+
+        let repo = RecurringRepo::new(&db);
+        repo.create(&sample_entry()).unwrap(); // tag_id = 1
+
+        let mut e2 = sample_entry();
+        e2.tag_id = 2;
+        repo.create(&e2).unwrap();
+
+        let results = repo.get_by_tag(1).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source, "Netflix");
+    }
+
+    #[test]
+    fn reassign_tag() {
+        let db = setup();
+        let tag_repo = TagRepo::new(&db);
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Other".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+
+        let repo = RecurringRepo::new(&db);
+        repo.create(&sample_entry()).unwrap(); // tag_id = 1
+        repo.create(&sample_entry()).unwrap(); // tag_id = 1
+
+        let count = repo.reassign_tag(1, 2).unwrap();
+        assert_eq!(count, 2);
+
+        let tag1 = repo.get_by_tag(1).unwrap();
+        assert_eq!(tag1.len(), 0);
+        let tag2 = repo.get_by_tag(2).unwrap();
+        assert_eq!(tag2.len(), 2);
     }
 
     #[test]

@@ -220,6 +220,16 @@ impl<'a> TransactionRepo<'a> {
         Ok(rows)
     }
 
+    /// Reassign all transactions from one tag to another.
+    /// Returns the number of rows updated.
+    pub fn reassign_tag(&self, old_tag_id: i64, new_tag_id: i64) -> Result<usize> {
+        let affected = self.db.conn().execute(
+            "UPDATE transactions SET tag_id = ?1 WHERE tag_id = ?2",
+            rusqlite::params![new_tag_id, old_tag_id],
+        )?;
+        Ok(affected)
+    }
+
     /// Return all transactions for a specific tag.
     pub fn get_by_tag(&self, tag_id: i64) -> Result<Vec<Transaction>> {
         let mut stmt = self.db.conn().prepare(
@@ -403,6 +413,32 @@ mod tests {
         let results = repo.get_filtered(&filter).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].source, "Uber ride");
+    }
+
+    #[test]
+    fn reassign_tag() {
+        let db = setup();
+        let tag_repo = TagRepo::new(&db);
+        tag_repo
+            .create(&Tag {
+                id: None,
+                name: "Other".into(),
+                parent_id: None,
+                icon: None,
+            })
+            .unwrap();
+
+        let repo = TransactionRepo::new(&db);
+        repo.create(&sample_tx(TransactionKind::Expense)).unwrap(); // tag_id = 1
+        repo.create(&sample_tx(TransactionKind::Expense)).unwrap(); // tag_id = 1
+
+        let count = repo.reassign_tag(1, 2).unwrap();
+        assert_eq!(count, 2);
+
+        let tag1_txs = repo.get_by_tag(1).unwrap();
+        assert_eq!(tag1_txs.len(), 0);
+        let tag2_txs = repo.get_by_tag(2).unwrap();
+        assert_eq!(tag2_txs.len(), 2);
     }
 
     #[test]

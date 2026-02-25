@@ -15,6 +15,7 @@ use crate::domain::models::{
 use crate::error::Result;
 use crate::ui::views::filter_form::FilterForm;
 use crate::ui::views::form::TransactionForm;
+use crate::ui::views::tags::{TagDeleteInfo, TagForm};
 
 /// Which top-level view is displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub enum View {
     Stats,
     Budgets,
     Recurring,
+    Tags,
 }
 
 /// Interaction mode, layered on top of the current view.
@@ -39,6 +41,10 @@ pub enum Mode {
     Confirming(String),
     /// Advanced filter form is open.
     Filtering,
+    /// Tag add/edit form is open.
+    TagEditing,
+    /// Tag delete modal with reassignment is open.
+    TagDeleting,
     /// Help overlay is displayed.
     Help,
 }
@@ -66,6 +72,7 @@ pub enum PendingAction {
     DeleteTransaction(i64),
     DeleteRecurring(i64),
     DeleteBudget(i64),
+    DeleteTag(i64),
 }
 
 /// Central application state.
@@ -90,6 +97,11 @@ pub struct App {
     pub tx_selected: usize,
     pub budget_selected: usize,
     pub recurring_selected: usize,
+    pub tag_selected: usize,
+
+    // Tag form/delete state.
+    pub tag_form: Option<TagForm>,
+    pub tag_delete_info: Option<TagDeleteInfo>,
 
     // Temporary status message.
     pub status_message: Option<(String, Instant)>,
@@ -133,6 +145,9 @@ impl App {
             tx_selected: 0,
             budget_selected: 0,
             recurring_selected: 0,
+            tag_selected: 0,
+            tag_form: None,
+            tag_delete_info: None,
             status_message: None,
             filter: TransactionFilter::default(),
             form: None,
@@ -315,6 +330,8 @@ impl App {
             Mode::Confirming(_) => self.handle_confirm_key(key),
             Mode::Adding | Mode::Editing => self.handle_form_key(key),
             Mode::Filtering => self.handle_filter_form_key(key),
+            Mode::TagEditing => self.handle_tag_form_key(key),
+            Mode::TagDeleting => self.handle_tag_delete_key(key),
             Mode::Help => self.handle_help_key(key),
             Mode::Normal => self.handle_normal_key(key),
         }
@@ -347,23 +364,29 @@ impl App {
                 self.current_view = View::Recurring;
                 return;
             }
+            KeyCode::Char('6') => {
+                self.current_view = View::Tags;
+                return;
+            }
             KeyCode::Tab => {
                 self.current_view = match self.current_view {
                     View::Dashboard => View::Transactions,
                     View::Transactions => View::Stats,
                     View::Stats => View::Budgets,
                     View::Budgets => View::Recurring,
-                    View::Recurring => View::Dashboard,
+                    View::Recurring => View::Tags,
+                    View::Tags => View::Dashboard,
                 };
                 return;
             }
             KeyCode::BackTab => {
                 self.current_view = match self.current_view {
-                    View::Dashboard => View::Recurring,
+                    View::Dashboard => View::Tags,
                     View::Transactions => View::Dashboard,
                     View::Stats => View::Transactions,
                     View::Budgets => View::Stats,
                     View::Recurring => View::Budgets,
+                    View::Tags => View::Recurring,
                 };
                 return;
             }
@@ -385,6 +408,7 @@ impl App {
             View::Stats => {}
             View::Budgets => self.handle_budgets_key(key),
             View::Recurring => self.handle_recurring_key(key),
+            View::Tags => self.handle_tags_key(key),
         }
     }
 
@@ -557,6 +581,230 @@ impl App {
                     }
                 } else {
                     self.set_status("No recurring entry selected.");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_tags_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.tag_selected > 0 {
+                    self.tag_selected -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !self.tags.is_empty() && self.tag_selected < self.tags.len() - 1 {
+                    self.tag_selected += 1;
+                }
+            }
+            KeyCode::Char('a') => {
+                self.tag_form = Some(TagForm::default());
+                self.mode = Mode::TagEditing;
+            }
+            KeyCode::Char('e') => {
+                if let Some(tag) = self.tags.get(self.tag_selected) {
+                    if let Some(id) = tag.id {
+                        self.tag_form = Some(TagForm::from_existing(id, &tag.name));
+                        self.mode = Mode::TagEditing;
+                    }
+                } else {
+                    self.set_status("No tag selected.");
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(tag) = self.tags.get(self.tag_selected) {
+                    if let Some(tag_id) = tag.id {
+                        let tx_repo = TransactionRepo::new(&self.db);
+                        let rec_repo = RecurringRepo::new(&self.db);
+                        let tx_count = tx_repo.get_by_tag(tag_id).map(|v| v.len()).unwrap_or(0);
+                        let rec_count = rec_repo.get_by_tag(tag_id).map(|v| v.len()).unwrap_or(0);
+
+                        if tx_count == 0 && rec_count == 0 {
+                            // No references — simple confirm
+                            self.pending_action = Some(PendingAction::DeleteTag(tag_id));
+                            self.mode = Mode::Confirming(format!("Delete tag '{}'?", tag.name));
+                        } else {
+                            // Has references — show reassignment modal
+                            let available: Vec<(i64, String)> = self
+                                .tags
+                                .iter()
+                                .filter(|t| t.id != Some(tag_id))
+                                .filter_map(|t| t.id.map(|id| (id, t.name.clone())))
+                                .collect();
+
+                            self.tag_delete_info = Some(TagDeleteInfo {
+                                tag_id,
+                                tag_name: tag.name.clone(),
+                                transaction_count: tx_count,
+                                recurring_count: rec_count,
+                                reassign_tag_index: 0,
+                                available_tags: available,
+                            });
+                            self.mode = Mode::TagDeleting;
+                        }
+                    }
+                } else {
+                    self.set_status("No tag selected.");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_tag_form_key(&mut self, key: KeyEvent) {
+        let Some(ref mut form) = self.tag_form else {
+            self.mode = Mode::Normal;
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.tag_form = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Enter => {
+                let name = form.name.trim().to_string();
+                if name.is_empty() {
+                    form.error = Some("Tag name cannot be empty.".into());
+                    return;
+                }
+
+                let tag_repo = TagRepo::new(&self.db);
+
+                // Check for duplicate name.
+                match tag_repo.find_by_name(&name) {
+                    Ok(Some(existing)) => {
+                        // Allow if editing the same tag.
+                        if form.editing_id != existing.id {
+                            form.error = Some(format!("Tag '{}' already exists.", name));
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        self.set_status(e.user_message());
+                        self.tag_form = None;
+                        self.mode = Mode::Normal;
+                        return;
+                    }
+                    Ok(None) => {}
+                }
+
+                let result = if let Some(id) = form.editing_id {
+                    let tag = crate::domain::models::Tag {
+                        id: Some(id),
+                        name: name.clone(),
+                        parent_id: None,
+                        icon: None,
+                    };
+                    tag_repo.update(&tag)
+                } else {
+                    let tag = crate::domain::models::Tag {
+                        id: None,
+                        name: name.clone(),
+                        parent_id: None,
+                        icon: None,
+                    };
+                    tag_repo.create(&tag).map(|_| ())
+                };
+
+                match result {
+                    Ok(()) => {
+                        let action = if form.editing_id.is_some() {
+                            "updated"
+                        } else {
+                            "created"
+                        };
+                        self.tag_form = None;
+                        self.mode = Mode::Normal;
+                        if let Err(e) = self.reload_tags() {
+                            self.set_status(e.user_message());
+                        } else {
+                            self.set_status(format!("Tag '{name}' {action}."));
+                        }
+                    }
+                    Err(e) => {
+                        form.error = Some(e.user_message());
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                form.name.pop();
+                form.error = None;
+            }
+            KeyCode::Char(c) => {
+                form.name.push(c);
+                form.error = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_tag_delete_key(&mut self, key: KeyEvent) {
+        let Some(ref mut info) = self.tag_delete_info else {
+            self.mode = Mode::Normal;
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.tag_delete_info = None;
+                self.mode = Mode::Normal;
+                self.set_status("Cancelled.");
+            }
+            KeyCode::Char(' ') => {
+                if !info.available_tags.is_empty() {
+                    info.reassign_tag_index =
+                        (info.reassign_tag_index + 1) % info.available_tags.len();
+                }
+            }
+            KeyCode::Enter => {
+                if info.available_tags.is_empty() {
+                    self.set_status("No tags available for reassignment.");
+                    return;
+                }
+
+                let tag_id = info.tag_id;
+                let (new_tag_id, ref new_tag_name) = info.available_tags[info.reassign_tag_index];
+                let new_tag_name = new_tag_name.clone();
+
+                let tx_repo = TransactionRepo::new(&self.db);
+                let rec_repo = RecurringRepo::new(&self.db);
+                let tag_repo = TagRepo::new(&self.db);
+
+                // Reassign transactions and recurring entries.
+                if let Err(e) = tx_repo.reassign_tag(tag_id, new_tag_id) {
+                    self.set_status(e.user_message());
+                    self.tag_delete_info = None;
+                    self.mode = Mode::Normal;
+                    return;
+                }
+                if let Err(e) = rec_repo.reassign_tag(tag_id, new_tag_id) {
+                    self.set_status(e.user_message());
+                    self.tag_delete_info = None;
+                    self.mode = Mode::Normal;
+                    return;
+                }
+
+                // Now delete the tag (budgets cascade automatically).
+                match tag_repo.delete(tag_id) {
+                    Ok(()) => {
+                        self.tag_delete_info = None;
+                        self.mode = Mode::Normal;
+                        if let Err(e) = self.reload_all() {
+                            self.set_status(e.user_message());
+                        } else {
+                            self.set_status(format!(
+                                "Tag deleted. Records reassigned to '{new_tag_name}'."
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        self.set_status(e.user_message());
+                        self.tag_delete_info = None;
+                        self.mode = Mode::Normal;
+                    }
                 }
             }
             _ => {}
@@ -788,6 +1036,19 @@ impl App {
                             self.set_status(e.user_message());
                         } else {
                             self.set_status("Budget deleted.");
+                        }
+                    }
+                    Err(e) => self.set_status(e.user_message()),
+                }
+            }
+            PendingAction::DeleteTag(id) => {
+                let repo = TagRepo::new(&self.db);
+                match repo.delete(id) {
+                    Ok(()) => {
+                        if let Err(e) = self.reload_tags() {
+                            self.set_status(e.user_message());
+                        } else {
+                            self.set_status("Tag deleted.");
                         }
                     }
                     Err(e) => self.set_status(e.user_message()),

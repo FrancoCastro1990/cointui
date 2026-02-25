@@ -61,6 +61,22 @@ struct Cli {
     /// Notes for --add
     #[arg(long)]
     notes: Option<String>,
+
+    /// List all tags
+    #[arg(long)]
+    tags: bool,
+
+    /// Add a new tag
+    #[arg(long)]
+    add_tag: Option<String>,
+
+    /// Rename a tag ("OldName:NewName")
+    #[arg(long)]
+    rename_tag: Option<String>,
+
+    /// Delete a tag (must have no transactions or recurring entries)
+    #[arg(long)]
+    delete_tag: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -81,7 +97,7 @@ fn main() -> Result<()> {
 
     // Seed default tags on a fresh database.
     let tag_repo = TagRepo::new(&db);
-    tag_repo.seed_defaults(&config.default_tags)?;
+    tag_repo.seed_defaults(&["Other".to_string(), "Salary".to_string()])?;
 
     // Handle CLI subcommands before launching TUI.
     if let Some(path) = cli.import {
@@ -95,6 +111,18 @@ fn main() -> Result<()> {
     }
     if let Some(path) = cli.restore {
         return cointui::cli::backup::run_restore(path, &config);
+    }
+    if cli.tags {
+        return cointui::cli::tags::run_list(&db);
+    }
+    if let Some(name) = cli.add_tag {
+        return cointui::cli::tags::run_add(&name, &db);
+    }
+    if let Some(spec) = cli.rename_tag {
+        return cointui::cli::tags::run_rename(&spec, &db);
+    }
+    if let Some(name) = cli.delete_tag {
+        return cointui::cli::tags::run_delete(&name, &db);
     }
     if let Some(source) = cli.add {
         let args = cointui::cli::add::AddArgs {
