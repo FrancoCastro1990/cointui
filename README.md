@@ -10,7 +10,7 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Transaction management** — Add, edit, and delete income/expense records with source, amount, date, category, and notes
 - **Hierarchical tags** — Organize transactions with categories and subcategories (e.g., Comida > Restaurantes)
 - **Budgets with alerts** — Set spending limits per category or globally (weekly/monthly/yearly) with visual progress bars and warnings at 80%+ usage
-- **Recurring transactions** — Define recurring entries (daily/weekly/monthly/yearly) that auto-insert on startup
+- **Recurring transactions** — Full CRUD for recurring entries (daily/weekly/monthly/yearly) with configurable day-of-month and month; auto-insert on startup
 - **Statistics** — Three sub-tabs (Overview, Trends, Budgets) with totals, savings rate gauge, expense breakdown by tag, monthly trends with configurable range (6/12/24 months), and budget status gauges
 - **Filtering** — Search transactions by text, date range, amount range, kind, and tag
 - **Tag management** — Create, rename, and delete tags from CLI or TUI with safe reassignment when tags are in use
@@ -136,7 +136,7 @@ cointui --restore /path/to/backup.db
 | Key | Action |
 |-----|--------|
 | `Tab` / `Shift+Tab` | Next / previous field |
-| `Space` | Toggle or cycle option fields (Kind, Tag, Recurring, Interval) |
+| `Space` | Toggle or cycle option fields (Kind, Tag) |
 | `Enter` | Save transaction |
 | `Esc` | Cancel |
 
@@ -145,6 +145,7 @@ cointui --restore /path/to/backup.db
 | Key | Action |
 |-----|--------|
 | `a` | Add new budget |
+| `e` | Edit selected budget |
 | `d` | Delete selected budget |
 
 ### Stats
@@ -159,6 +160,8 @@ cointui --restore /path/to/backup.db
 
 | Key | Action |
 |-----|--------|
+| `a` | Add new recurring entry |
+| `e` | Edit selected entry |
 | `Space` | Toggle active/inactive |
 | `d` | Delete entry |
 
@@ -208,7 +211,7 @@ List of budget rules with gauge progress bars. Color indicators: green (< 60%), 
 
 ### 5. Recurring
 
-Manage recurring transaction templates. Toggle active/inactive, view interval and amounts.
+Full CRUD for recurring transaction templates. Add, edit, toggle active/inactive, and delete entries. Monthly entries let you pick the day of month (1-31), yearly entries let you pick month and day. Schedule is shown in the Interval column (e.g. "Monthly (15)", "Yearly (Mar 15)").
 
 ### 6. Tags
 
@@ -305,7 +308,7 @@ src/
 
 ```bash
 cargo check          # Fast compilation check
-cargo test           # Run all tests (60 tests)
+cargo test           # Run all tests (62 tests)
 cargo clippy         # Lint (must pass with zero warnings)
 cargo build --release
 ```
@@ -316,6 +319,7 @@ cargo build --release
 - [x] Sortable columns in transaction table
 - [x] Tag management (CLI + TUI)
 - [x] Stats redesign with sub-tabs (Overview, Trends, Budgets)
+- [x] Recurring CRUD with configurable intervals (day of month, month)
 
 ## License
 

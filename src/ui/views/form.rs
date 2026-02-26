@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::domain::models::{RecurringInterval, Transaction, TransactionKind};
+use crate::domain::models::{Transaction, TransactionKind};
 use crate::ui::theme;
 
 /// Which form field is currently focused.
@@ -17,8 +17,6 @@ pub enum FormField {
     Kind,
     Tag,
     Notes,
-    Recurring,
-    Interval,
 }
 
 const FIELD_ORDER: &[FormField] = &[
@@ -28,8 +26,6 @@ const FIELD_ORDER: &[FormField] = &[
     FormField::Kind,
     FormField::Tag,
     FormField::Notes,
-    FormField::Recurring,
-    FormField::Interval,
 ];
 
 /// State for the transaction add/edit form.
@@ -45,8 +41,6 @@ pub struct TransactionForm {
     pub tag_names: Vec<String>,
     pub tag_ids: Vec<i64>,
     pub notes: String,
-    pub recurring: bool,
-    pub interval: RecurringInterval,
     pub field_index: usize,
     pub errors: Vec<String>,
 }
@@ -64,8 +58,6 @@ impl TransactionForm {
             tag_names,
             tag_ids,
             notes: String::new(),
-            recurring: false,
-            interval: RecurringInterval::Monthly,
             field_index: 0,
             errors: Vec::new(),
         }
@@ -92,8 +84,6 @@ impl TransactionForm {
             tag_names,
             tag_ids,
             notes: tx.notes.clone().unwrap_or_default(),
-            recurring: false,
-            interval: RecurringInterval::Monthly,
             field_index: 0,
             errors: Vec::new(),
         }
@@ -106,24 +96,13 @@ impl TransactionForm {
 
     /// Move focus to the next field.
     pub fn next_field(&mut self) {
-        let max = if self.recurring {
-            FIELD_ORDER.len()
-        } else {
-            // Skip the Interval field when recurring is off.
-            FIELD_ORDER.len() - 1
-        };
-        self.field_index = (self.field_index + 1) % max;
+        self.field_index = (self.field_index + 1) % FIELD_ORDER.len();
     }
 
     /// Move focus to the previous field.
     pub fn prev_field(&mut self) {
-        let max = if self.recurring {
-            FIELD_ORDER.len()
-        } else {
-            FIELD_ORDER.len() - 1
-        };
         if self.field_index == 0 {
-            self.field_index = max - 1;
+            self.field_index = FIELD_ORDER.len() - 1;
         } else {
             self.field_index -= 1;
         }
@@ -144,7 +123,11 @@ impl TransactionForm {
                     self.date.push(c);
                 }
             }
-            FormField::Notes => self.notes.push(c),
+            FormField::Notes => {
+                if !self.is_auto_recurring() {
+                    self.notes.push(c);
+                }
+            }
             _ => {}
         }
     }
@@ -155,28 +138,26 @@ impl TransactionForm {
             FormField::Source => { self.source.pop(); }
             FormField::Amount => { self.amount.pop(); }
             FormField::Date => { self.date.pop(); }
-            FormField::Notes => { self.notes.pop(); }
+            FormField::Notes => {
+                if !self.is_auto_recurring() {
+                    self.notes.pop();
+                }
+            }
             _ => {}
         }
     }
 
-    /// Toggle a boolean/enum field, or cycle through options.
+    /// Toggle a boolean/enum field.
     pub fn toggle_field(&mut self) {
-        match self.current_field() {
-            FormField::Kind => {
-                self.kind = match self.kind {
-                    TransactionKind::Income => TransactionKind::Expense,
-                    TransactionKind::Expense => TransactionKind::Income,
-                };
-            }
-            FormField::Recurring => {
-                self.recurring = !self.recurring;
-            }
-            _ => {}
+        if self.current_field() == FormField::Kind {
+            self.kind = match self.kind {
+                TransactionKind::Income => TransactionKind::Expense,
+                TransactionKind::Expense => TransactionKind::Income,
+            };
         }
     }
 
-    /// Cycle through list options (tags, intervals).
+    /// Cycle through list options (tags).
     pub fn cycle_option(&mut self) {
         match self.current_field() {
             FormField::Tag => {
@@ -185,19 +166,16 @@ impl TransactionForm {
                         (self.selected_tag_index + 1) % self.tag_names.len();
                 }
             }
-            FormField::Interval => {
-                self.interval = match self.interval {
-                    RecurringInterval::Daily => RecurringInterval::Weekly,
-                    RecurringInterval::Weekly => RecurringInterval::Monthly,
-                    RecurringInterval::Monthly => RecurringInterval::Yearly,
-                    RecurringInterval::Yearly => RecurringInterval::Daily,
-                };
-            }
             FormField::Kind => {
                 self.toggle_field();
             }
             _ => {}
         }
+    }
+
+    /// Whether the notes field contains auto-recurring text (read-only).
+    pub fn is_auto_recurring(&self) -> bool {
+        self.notes.starts_with("Auto: recurring")
     }
 
     /// Validate and convert form data to a Transaction. Returns Err with messages
@@ -267,14 +245,6 @@ impl TransactionForm {
         Some(val.round() as i64)
     }
 
-    /// Get the interval if recurring is enabled.
-    pub fn get_interval(&self) -> Option<RecurringInterval> {
-        if self.recurring {
-            Some(self.interval)
-        } else {
-            None
-        }
-    }
 }
 
 /// Calculate a centered popup rectangle.
@@ -319,7 +289,7 @@ pub fn draw_form(frame: &mut Frame, form: &TransactionForm, currency: &str) {
     frame.render_widget(block, area);
 
     // Determine how many fields to show.
-    let field_count: u16 = if form.recurring { 10 } else { 9 };
+    let field_count: u16 = 8;
     let mut constraints: Vec<Constraint> = Vec::new();
     // Each field row gets 2 lines (label + input), plus spacing.
     for _ in 0..field_count {
@@ -402,40 +372,21 @@ pub fn draw_form(frame: &mut Frame, form: &TransactionForm, currency: &str) {
     );
     row += 1;
 
-    // Notes
+    // Notes (read-only if auto-recurring)
+    let notes_label = if form.is_auto_recurring() {
+        "Notes (auto):"
+    } else {
+        "Notes:"
+    };
+    let notes_focused = form.current_field() == FormField::Notes && !form.is_auto_recurring();
     render_text_field(
         frame,
         areas[row],
-        "Notes:",
+        notes_label,
         &form.notes,
-        form.current_field() == FormField::Notes,
+        notes_focused,
     );
     row += 1;
-
-    // Recurring toggle
-    let rec_label = if form.recurring { "Yes" } else { "No" };
-    render_toggle_field(
-        frame,
-        areas[row],
-        "Recurring:",
-        rec_label,
-        theme::text_style(),
-        form.current_field() == FormField::Recurring,
-    );
-    row += 1;
-
-    // Interval (only if recurring)
-    if form.recurring {
-        render_toggle_field(
-            frame,
-            areas[row],
-            "Interval:",
-            &form.interval.to_string(),
-            theme::text_style(),
-            form.current_field() == FormField::Interval,
-        );
-        row += 1;
-    }
 
     // Help text
     let help_lines = vec![
@@ -444,7 +395,7 @@ pub fn draw_form(frame: &mut Frame, form: &TransactionForm, currency: &str) {
             theme::muted_style(),
         )),
         Line::from(Span::styled(
-            "Space: toggle/cycle on Type, Tag, Recurring, Interval",
+            "Space: toggle/cycle on Type, Tag",
             theme::muted_style(),
         )),
     ];

@@ -130,8 +130,30 @@ impl Database {
                 .execute_batch("PRAGMA user_version = 1;")?;
         }
 
-        // Future migrations go here:
-        // if version < 2 { ... PRAGMA user_version = 2; }
+        if version < 2 {
+            // Add day_of_month and month columns for configurable recurring intervals.
+            self.conn.execute_batch(
+                "ALTER TABLE recurring_entries ADD COLUMN day_of_month INTEGER;
+                 ALTER TABLE recurring_entries ADD COLUMN month INTEGER;"
+            )?;
+
+            // Populate new columns from existing start_date values.
+            // Monthly entries: extract day from start_date.
+            self.conn.execute_batch(
+                "UPDATE recurring_entries
+                 SET day_of_month = CAST(strftime('%d', start_date) AS INTEGER)
+                 WHERE interval = 'monthly';"
+            )?;
+            // Yearly entries: extract both month and day from start_date.
+            self.conn.execute_batch(
+                "UPDATE recurring_entries
+                 SET day_of_month = CAST(strftime('%d', start_date) AS INTEGER),
+                     month = CAST(strftime('%m', start_date) AS INTEGER)
+                 WHERE interval = 'yearly';"
+            )?;
+
+            self.conn.execute_batch("PRAGMA user_version = 2;")?;
+        }
 
         Ok(())
     }

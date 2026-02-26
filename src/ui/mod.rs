@@ -7,9 +7,11 @@ use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::{App, Mode, SortColumn, SortDirection, View};
+use crate::ui::views::budget::draw_budget_form;
 use crate::ui::views::filter_form::draw_filter_form;
 use crate::ui::views::form::draw_form;
 use crate::ui::views::help::draw_help;
+use crate::ui::views::recurring::draw_recurring_form;
 use crate::ui::views::tags::{draw_tag_delete_modal, draw_tag_form};
 
 /// Main draw function: dispatches to the current view's renderer.
@@ -37,6 +39,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if matches!(app.mode, Mode::Adding | Mode::Editing)
         && let Some(ref form) = app.form {
             draw_form(frame, form, &app.config.currency);
+        }
+
+    // Draw the budget form overlay if in BudgetAdding or BudgetEditing mode.
+    if matches!(app.mode, Mode::BudgetAdding | Mode::BudgetEditing)
+        && let Some(ref form) = app.budget_form {
+            draw_budget_form(frame, form, &app.config.currency);
+        }
+
+    // Draw the recurring form overlay if in RecurringAdding or RecurringEditing mode.
+    if matches!(app.mode, Mode::RecurringAdding | Mode::RecurringEditing)
+        && let Some(ref form) = app.recurring_form {
+            draw_recurring_form(frame, form, &app.config.currency);
         }
 
     // Draw the filter form overlay.
@@ -176,9 +190,10 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
                     TransactionKind::Income => theme::income_style(),
                     TransactionKind::Expense => theme::expense_style(),
                 };
+                let is_recurring = tx.notes.as_ref().is_some_and(|n| n.starts_with("Auto: recurring"));
                 let kind_str = match tx.kind {
-                    TransactionKind::Income => "INC",
-                    TransactionKind::Expense => "EXP",
+                    TransactionKind::Income => if is_recurring { "INC↻" } else { "INC" },
+                    TransactionKind::Expense => if is_recurring { "EXP↻" } else { "EXP" },
                 };
                 Row::new(vec![
                     Cell::from(tx.date.format("%Y-%m-%d").to_string()),
@@ -197,7 +212,7 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
             Constraint::Length(12),
             Constraint::Fill(1),
             Constraint::Length(16),
-            Constraint::Length(5),
+            Constraint::Length(6),
             Constraint::Length(16),
         ];
 
@@ -242,110 +257,7 @@ fn draw_transactions_view(frame: &mut Frame, app: &mut App, area: ratatui::layou
 }
 
 fn draw_recurring_view(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let [table_area, footer_area] = Layout::vertical([
-        Constraint::Min(5),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-
-    // Draw table with stateful widget.
-    {
-        use ratatui::style::Modifier;
-        use ratatui::widgets::{Cell, Row, Table, TableState};
-        use crate::domain::models::{format_cents, TransactionKind};
-
-        let currency = app.config.currency.clone();
-        let tsep = app.config.thousands_separator.clone();
-        let dsep = app.config.decimal_separator.clone();
-        let block = theme::styled_block(" Recurring Entries ");
-
-        if app.recurring_entries.is_empty() {
-            let para = Paragraph::new(Span::styled(
-                "  No recurring entries. Add a transaction with recurring enabled.",
-                theme::muted_style(),
-            ))
-            .block(block);
-            frame.render_widget(para, table_area);
-        } else {
-            let header =
-                Row::new(vec!["Status", "Source", "Amount", "Type", "Interval", "Tag"])
-                    .style(theme::header_style().add_modifier(Modifier::UNDERLINED))
-                    .bottom_margin(1);
-
-            let rows: Vec<Row> = app
-                .recurring_entries
-                .iter()
-                .map(|entry| {
-                    let status = if entry.active { "[ON] " } else { "[OFF]" };
-                    let status_style = if entry.active {
-                        theme::income_style()
-                    } else {
-                        theme::muted_style()
-                    };
-                    let amount_style = match entry.kind {
-                        TransactionKind::Income => theme::income_style(),
-                        TransactionKind::Expense => theme::expense_style(),
-                    };
-                    let kind_str = match entry.kind {
-                        TransactionKind::Income => "INC",
-                        TransactionKind::Expense => "EXP",
-                    };
-                    let tag_name = app.tag_name(entry.tag_id);
-
-                    Row::new(vec![
-                        Cell::from(Span::styled(status, status_style)),
-                        Cell::from(entry.source.clone()),
-                        Cell::from(Span::styled(
-                            format_cents(entry.amount, &currency, &tsep, &dsep),
-                            amount_style,
-                        )),
-                        Cell::from(Span::styled(kind_str, amount_style)),
-                        Cell::from(entry.interval.to_string()),
-                        Cell::from(tag_name),
-                    ])
-                })
-                .collect();
-
-            let widths = [
-                Constraint::Length(6),
-                Constraint::Fill(1),
-                Constraint::Length(16),
-                Constraint::Length(5),
-                Constraint::Length(10),
-                Constraint::Length(16),
-            ];
-
-            let table = Table::new(rows, widths)
-                .header(header)
-                .block(block)
-                .style(theme::text_style())
-                .column_spacing(1)
-                .row_highlight_style(theme::selected_style())
-                .highlight_symbol("> ");
-
-            let mut state = TableState::default();
-            if !app.recurring_entries.is_empty() {
-                state.select(Some(app.recurring_selected));
-            }
-
-            frame.render_stateful_widget(table, table_area, &mut state);
-        }
-    }
-
-    // Footer
-    {
-        let help = Line::from(vec![
-            Span::styled(" [Space]", theme::header_style()),
-            Span::styled("toggle ", theme::text_style()),
-            Span::styled("[d]", theme::header_style()),
-            Span::styled("elete ", theme::text_style()),
-            Span::styled("[Up/Down]", theme::header_style()),
-            Span::styled("select ", theme::text_style()),
-            Span::styled("[Esc]", theme::header_style()),
-            Span::styled("back ", theme::text_style()),
-        ]);
-        frame.render_widget(Paragraph::new(help), footer_area);
-    }
+    views::recurring::draw_recurring(frame, app, area);
 }
 
 fn draw_tabs(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -430,17 +342,25 @@ fn draw_confirm(frame: &mut Frame, message: &str) {
 
 /// Wrapper to draw the dashboard into a specific area (called from the main draw).
 fn draw_dashboard(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let [header_area, main_area, alerts_area, footer_area] = Layout::vertical([
+    let [header_area, main_area, bottom_area, footer_area] = Layout::vertical([
         Constraint::Length(5),
         Constraint::Min(10),
-        Constraint::Length(4),
+        Constraint::Length(6),
         Constraint::Length(1),
     ])
     .areas(area);
 
+    let [alerts_area, recurring_area] =
+        Layout::horizontal([Constraint::Ratio(1, 2); 2]).areas(bottom_area);
+
+    let [recent_area, spending_area] =
+        Layout::horizontal([Constraint::Ratio(3, 5), Constraint::Ratio(2, 5)]).areas(main_area);
+
     views::dashboard::draw_dashboard_header(frame, app, header_area);
-    views::dashboard::draw_dashboard_recent(frame, app, main_area);
+    views::dashboard::draw_dashboard_recent(frame, app, recent_area);
+    views::dashboard::draw_dashboard_spending(frame, app, spending_area);
     views::dashboard::draw_dashboard_alerts(frame, app, alerts_area);
+    views::dashboard::draw_dashboard_recurring(frame, app, recurring_area);
     views::dashboard::draw_dashboard_footer(frame, footer_area);
 }
 

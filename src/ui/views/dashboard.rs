@@ -85,9 +85,10 @@ pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout
                 TransactionKind::Income => theme::income_style(),
                 TransactionKind::Expense => theme::expense_style(),
             };
+            let is_recurring = tx.notes.as_ref().is_some_and(|n| n.starts_with("Auto: recurring"));
             let kind_str = match tx.kind {
-                TransactionKind::Income => "INC",
-                TransactionKind::Expense => "EXP",
+                TransactionKind::Income => if is_recurring { "INC↻" } else { "INC" },
+                TransactionKind::Expense => if is_recurring { "EXP↻" } else { "EXP" },
             };
 
             Row::new(vec![
@@ -107,7 +108,7 @@ pub fn draw_dashboard_recent(frame: &mut Frame, app: &App, area: ratatui::layout
         Constraint::Length(12),
         Constraint::Fill(1),
         Constraint::Length(16),
-        Constraint::Length(5),
+        Constraint::Length(6),
         Constraint::Length(16),
     ];
 
@@ -134,26 +135,26 @@ pub fn draw_dashboard_alerts(frame: &mut Frame, app: &App, area: ratatui::layout
             continue;
         }
         let pct = (*spent as f64 / limit as f64) * 100.0;
-        if pct >= 80.0 {
-            let tag_name = match budget.tag_id {
-                Some(tid) => app.tag_name(tid),
-                None => "Global".to_string(),
-            };
-            let style = if pct >= 100.0 {
-                theme::expense_style()
-            } else {
-                theme::warning_style()
-            };
-            let msg = format!(
-                "{}: {} / {} ({:.0}%) - {}",
-                tag_name,
-                format_cents(*spent, currency, tsep, dsep),
-                format_cents(limit, currency, tsep, dsep),
-                pct,
-                budget.period,
-            );
-            alerts.push(Line::from(Span::styled(msg, style)));
-        }
+        let tag_name = match budget.tag_id {
+            Some(tid) => app.tag_name(tid),
+            None => "Global".to_string(),
+        };
+        let style = if pct >= 100.0 {
+            theme::expense_style()
+        } else if pct >= 60.0 {
+            theme::warning_style()
+        } else {
+            theme::income_style()
+        };
+        let msg = format!(
+            "{}: {} / {} ({:.0}%) - {}",
+            tag_name,
+            format_cents(*spent, currency, tsep, dsep),
+            format_cents(limit, currency, tsep, dsep),
+            pct,
+            budget.period,
+        );
+        alerts.push(Line::from(Span::styled(msg, style)));
     }
 
     if alerts.is_empty() {
@@ -165,6 +166,103 @@ pub fn draw_dashboard_alerts(frame: &mut Frame, app: &App, area: ratatui::layout
 
     let para = Paragraph::new(alerts).block(block);
     frame.render_widget(para, area);
+}
+
+pub fn draw_dashboard_recurring(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = theme::styled_block(" Recurring ");
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
+
+    if app.recurring_entries.is_empty() {
+        let para = Paragraph::new(Span::styled(
+            "No recurring entries.",
+            theme::muted_style(),
+        ))
+        .block(block);
+        frame.render_widget(para, area);
+        return;
+    }
+
+    let lines: Vec<Line> = app
+        .recurring_entries
+        .iter()
+        .map(|entry| {
+            let status = if entry.active { "[ON]" } else { "[OFF]" };
+            let status_style = if entry.active {
+                theme::income_style()
+            } else {
+                theme::muted_style()
+            };
+            let tag_name = app.tag_name(entry.tag_id);
+            Line::from(vec![
+                Span::styled(status, status_style),
+                Span::raw(" "),
+                Span::styled(&entry.source, theme::text_style()),
+                Span::raw("  "),
+                Span::styled(
+                    format_cents(entry.amount, currency, tsep, dsep),
+                    theme::text_style(),
+                ),
+                Span::raw("  "),
+                Span::styled(entry.interval.to_string(), theme::muted_style()),
+                Span::raw("  "),
+                Span::styled(tag_name, theme::muted_style()),
+            ])
+        })
+        .collect();
+
+    let para = Paragraph::new(lines).block(block);
+    frame.render_widget(para, area);
+}
+
+pub fn draw_dashboard_spending(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let [month_area, year_area] =
+        Layout::vertical([Constraint::Ratio(1, 2); 2]).areas(area);
+
+    let now = chrono::Local::now();
+    let month_title = format!(" Spending ({}) ", now.format("%b %Y"));
+    let year_title = format!(" Spending ({}) ", now.format("%Y"));
+
+    draw_spending_block(frame, app, month_area, &month_title, &app.dashboard_spending_month);
+    draw_spending_block(frame, app, year_area, &year_title, &app.dashboard_spending_year);
+}
+
+fn draw_spending_block(
+    frame: &mut Frame,
+    app: &App,
+    area: ratatui::layout::Rect,
+    title: &str,
+    data: &[(i64, i64)],
+) {
+    let block = theme::styled_block(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if data.is_empty() {
+        let empty = Paragraph::new(Span::styled("No expenses.", theme::muted_style()));
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    let currency = &app.config.currency;
+    let tsep = &app.config.thousands_separator;
+    let dsep = &app.config.decimal_separator;
+
+    let lines: Vec<Line> = data
+        .iter()
+        .take(5)
+        .map(|(tag_id, amount)| {
+            let tag_name = app.tag_name(*tag_id);
+            let formatted = format_cents(*amount, currency, tsep, dsep);
+            Line::from(vec![
+                Span::styled(format!("{:<16}", tag_name), theme::text_style()),
+                Span::styled(formatted, theme::expense_style()),
+            ])
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 pub fn draw_dashboard_footer(frame: &mut Frame, area: ratatui::layout::Rect) {

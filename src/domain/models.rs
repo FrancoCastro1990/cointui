@@ -223,7 +223,10 @@ pub struct RecurringEntry {
     pub kind: TransactionKind,
     pub tag_id: i64,
     pub interval: RecurringInterval,
-    pub start_date: NaiveDate,
+    /// Day of month (1-31) for Monthly/Yearly intervals.
+    pub day_of_month: Option<u32>,
+    /// Month (1-12) for Yearly interval.
+    pub month: Option<u32>,
     pub last_inserted_date: Option<NaiveDate>,
     pub active: bool,
 }

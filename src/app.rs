@@ -10,11 +10,13 @@ use crate::db::recurring_repo::RecurringRepo;
 use crate::db::tag_repo::TagRepo;
 use crate::db::transaction_repo::{TransactionFilter, TransactionRepo};
 use crate::domain::models::{
-    Budget, BudgetPeriod, RecurringEntry, RecurringInterval, Tag, Transaction,
+    Budget, RecurringEntry, RecurringInterval, Tag, Transaction,
 };
 use crate::error::Result;
 use crate::ui::views::filter_form::FilterForm;
+use crate::ui::views::budget::BudgetForm;
 use crate::ui::views::form::TransactionForm;
+use crate::ui::views::recurring::RecurringForm;
 use crate::ui::views::tags::{TagDeleteInfo, TagForm};
 
 /// Which top-level view is displayed.
@@ -41,6 +43,14 @@ pub enum Mode {
     Confirming(String),
     /// Advanced filter form is open.
     Filtering,
+    /// Budget add form is open.
+    BudgetAdding,
+    /// Budget edit form is open.
+    BudgetEditing,
+    /// Recurring add form is open.
+    RecurringAdding,
+    /// Recurring edit form is open.
+    RecurringEditing,
     /// Tag add/edit form is open.
     TagEditing,
     /// Tag delete modal with reassignment is open.
@@ -103,6 +113,10 @@ pub struct App {
     pub budget_spending: Vec<(Budget, i64)>,
     /// Expense totals by tag_id (always unfiltered).
     pub expense_by_tag: Vec<(i64, i64)>,
+    /// Dashboard: expense by tag for current month.
+    pub dashboard_spending_month: Vec<(i64, i64)>,
+    /// Dashboard: expense by tag for current year.
+    pub dashboard_spending_year: Vec<(i64, i64)>,
 
     // Selection indices.
     pub tx_selected: usize,
@@ -122,6 +136,12 @@ pub struct App {
 
     // Form state (used for Adding / Editing modes).
     pub form: Option<TransactionForm>,
+
+    // Budget form state (used for BudgetAdding / BudgetEditing modes).
+    pub budget_form: Option<BudgetForm>,
+
+    // Recurring form state (used for RecurringAdding / RecurringEditing modes).
+    pub recurring_form: Option<RecurringForm>,
 
     // Filter form state (used for Filtering mode).
     pub filter_form: Option<FilterForm>,
@@ -166,6 +186,8 @@ impl App {
             monthly_totals: Vec::new(),
             budget_spending: Vec::new(),
             expense_by_tag: Vec::new(),
+            dashboard_spending_month: Vec::new(),
+            dashboard_spending_year: Vec::new(),
             tx_selected: 0,
             budget_selected: 0,
             recurring_selected: 0,
@@ -175,6 +197,8 @@ impl App {
             status_message: None,
             filter: TransactionFilter::default(),
             form: None,
+            budget_form: None,
+            recurring_form: None,
             filter_form: None,
             pending_action: None,
             sort_column: SortColumn::Date,
@@ -199,6 +223,7 @@ impl App {
         self.reload_tags()?;
         self.reload_transactions()?;
         self.reload_dashboard_transactions()?;
+        self.reload_dashboard_spending()?;
         self.reload_budgets()?;
         self.reload_recurring()?;
         self.reload_totals()?;
@@ -228,6 +253,28 @@ impl App {
     pub fn reload_dashboard_transactions(&mut self) -> Result<()> {
         let repo = TransactionRepo::new(&self.db);
         self.dashboard_transactions = repo.get_recent(10)?;
+        Ok(())
+    }
+
+    pub fn reload_dashboard_spending(&mut self) -> Result<()> {
+        use chrono::{Local, NaiveDate};
+
+        let today = Local::now().date_naive();
+        let month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap();
+        let month_end = if today.month() == 12 {
+            NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap()
+        } else {
+            NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1).unwrap()
+        };
+        let year_start = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap();
+        let year_end = NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap();
+
+        let repo = TransactionRepo::new(&self.db);
+        let fmt = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+        self.dashboard_spending_month =
+            repo.get_expense_by_tag_for_period(&fmt(month_start), &fmt(month_end))?;
+        self.dashboard_spending_year =
+            repo.get_expense_by_tag_for_period(&fmt(year_start), &fmt(year_end))?;
         Ok(())
     }
 
@@ -421,6 +468,8 @@ impl App {
         match &self.mode {
             Mode::Confirming(_) => self.handle_confirm_key(key),
             Mode::Adding | Mode::Editing => self.handle_form_key(key),
+            Mode::BudgetAdding | Mode::BudgetEditing => self.handle_budget_form_key(key),
+            Mode::RecurringAdding | Mode::RecurringEditing => self.handle_recurring_form_key(key),
             Mode::Filtering => self.handle_filter_form_key(key),
             Mode::TagEditing => self.handle_tag_form_key(key),
             Mode::TagDeleting => self.handle_tag_delete_key(key),
@@ -593,29 +642,21 @@ impl App {
                 }
             }
             KeyCode::Char('a') => {
-                // Quick-add a budget: create a monthly budget for the first tag.
                 if self.tags.is_empty() {
                     self.set_status("No tags available to create a budget.");
                     return;
                 }
-                let tag_id = self.tags[0].id;
-                let budget = Budget {
-                    id: None,
-                    tag_id,
-                    amount: 10_000, // Default $100
-                    period: BudgetPeriod::Monthly,
-                    active: true,
-                };
-                let repo = BudgetRepo::new(&self.db);
-                match repo.create(&budget) {
-                    Ok(_) => {
-                        if let Err(e) = self.reload_budgets().and_then(|_| self.reload_budget_spending()) {
-                            self.set_status(e.user_message());
-                        } else {
-                            self.set_status("Budget created. Edit via DB for now.");
-                        }
-                    }
-                    Err(e) => self.set_status(e.user_message()),
+                let (names, ids) = self.tag_names_and_ids();
+                self.budget_form = Some(BudgetForm::new(names, ids));
+                self.mode = Mode::BudgetAdding;
+            }
+            KeyCode::Char('e') => {
+                if let Some((budget, _)) = self.budget_spending.get(self.budget_selected) {
+                    let (names, ids) = self.tag_names_and_ids();
+                    self.budget_form = Some(BudgetForm::from_budget(budget, names, ids));
+                    self.mode = Mode::BudgetEditing;
+                } else {
+                    self.set_status("No budget selected.");
                 }
             }
             KeyCode::Char('d') => {
@@ -644,6 +685,24 @@ impl App {
                     && self.recurring_selected < self.recurring_entries.len() - 1
                 {
                     self.recurring_selected += 1;
+                }
+            }
+            KeyCode::Char('a') => {
+                if self.tags.is_empty() {
+                    self.set_status("No tags available to create a recurring entry.");
+                    return;
+                }
+                let (names, ids) = self.tag_names_and_ids();
+                self.recurring_form = Some(RecurringForm::new(names, ids));
+                self.mode = Mode::RecurringAdding;
+            }
+            KeyCode::Char('e') => {
+                if let Some(entry) = self.recurring_entries.get(self.recurring_selected) {
+                    let (names, ids) = self.tag_names_and_ids();
+                    self.recurring_form = Some(RecurringForm::from_recurring(entry, names, ids));
+                    self.mode = Mode::RecurringEditing;
+                } else {
+                    self.set_status("No recurring entry selected.");
                 }
             }
             KeyCode::Char(' ') => {
@@ -962,12 +1021,10 @@ impl App {
                 // Toggle/cycle on toggle fields.
                 let field = form.current_field();
                 match field {
-                    crate::ui::views::form::FormField::Kind
-                    | crate::ui::views::form::FormField::Recurring => {
+                    crate::ui::views::form::FormField::Kind => {
                         form.toggle_field();
                     }
-                    crate::ui::views::form::FormField::Tag
-                    | crate::ui::views::form::FormField::Interval => {
+                    crate::ui::views::form::FormField::Tag => {
                         form.cycle_option();
                     }
                     _ => {
@@ -977,6 +1034,90 @@ impl App {
             }
             KeyCode::Enter => {
                 self.save_form();
+            }
+            KeyCode::Backspace => {
+                form.backspace();
+            }
+            KeyCode::Char(c) => {
+                form.type_char(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_budget_form_key(&mut self, key: KeyEvent) {
+        let Some(ref mut form) = self.budget_form else {
+            self.mode = Mode::Normal;
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.budget_form = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Tab => {
+                form.next_field();
+            }
+            KeyCode::BackTab => {
+                form.prev_field();
+            }
+            KeyCode::Char(' ') => {
+                match form.current_field() {
+                    crate::ui::views::budget::BudgetFormField::Tag
+                    | crate::ui::views::budget::BudgetFormField::Period => {
+                        form.cycle_option();
+                    }
+                    _ => {
+                        form.type_char(' ');
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                self.save_budget_form();
+            }
+            KeyCode::Backspace => {
+                form.backspace();
+            }
+            KeyCode::Char(c) => {
+                form.type_char(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_recurring_form_key(&mut self, key: KeyEvent) {
+        let Some(ref mut form) = self.recurring_form else {
+            self.mode = Mode::Normal;
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.recurring_form = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Tab => {
+                form.next_field();
+            }
+            KeyCode::BackTab => {
+                form.prev_field();
+            }
+            KeyCode::Char(' ') => {
+                use crate::ui::views::recurring::RecurringFormField;
+                match form.current_field() {
+                    RecurringFormField::Kind
+                    | RecurringFormField::Tag
+                    | RecurringFormField::Interval => {
+                        form.cycle_option();
+                    }
+                    _ => {
+                        form.type_char(' ');
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                self.save_recurring_form();
             }
             KeyCode::Backspace => {
                 form.backspace();
@@ -1069,7 +1210,6 @@ impl App {
             return;
         };
 
-        let interval = form.get_interval();
         let is_editing = form.editing_id.is_some();
 
         match form.to_transaction() {
@@ -1083,30 +1223,6 @@ impl App {
 
                 match result {
                     Ok(_id) => {
-                        // If recurring was enabled and this is a new transaction,
-                        // also create a recurring entry.
-                        if !is_editing
-                            && let Some(interval) = interval {
-                                let entry = RecurringEntry {
-                                    id: None,
-                                    source: tx.source.clone(),
-                                    amount: tx.amount,
-                                    kind: tx.kind,
-                                    tag_id: tx.tag_id,
-                                    interval,
-                                    start_date: tx.date,
-                                    last_inserted_date: Some(tx.date),
-                                    active: true,
-                                };
-                                let rec_repo = RecurringRepo::new(&self.db);
-                                if let Err(e) = rec_repo.create(&entry) {
-                                    self.set_status(format!(
-                                        "Transaction saved but recurring failed: {}",
-                                        e.user_message()
-                                    ));
-                                }
-                            }
-
                         self.form = None;
                         self.mode = Mode::Normal;
                         if let Err(e) = self.reload_all() {
@@ -1114,6 +1230,85 @@ impl App {
                         } else {
                             let action = if is_editing { "updated" } else { "added" };
                             self.set_status(format!("Transaction {}.", action));
+                        }
+                    }
+                    Err(e) => {
+                        self.set_status(e.user_message());
+                    }
+                }
+            }
+            Err(_errors) => {
+                // Errors are displayed in the form itself.
+            }
+        }
+    }
+
+    fn save_budget_form(&mut self) {
+        let Some(ref mut form) = self.budget_form else {
+            return;
+        };
+
+        let is_editing = form.editing_id.is_some();
+
+        match form.to_budget() {
+            Ok(budget) => {
+                let repo = BudgetRepo::new(&self.db);
+                let result = if is_editing {
+                    repo.update(&budget).map(|_| budget.id.unwrap_or(0))
+                } else {
+                    repo.create(&budget)
+                };
+
+                match result {
+                    Ok(_) => {
+                        self.budget_form = None;
+                        self.mode = Mode::Normal;
+                        if let Err(e) = self
+                            .reload_budgets()
+                            .and_then(|_| self.reload_budget_spending())
+                        {
+                            self.set_status(e.user_message());
+                        } else {
+                            let action = if is_editing { "updated" } else { "created" };
+                            self.set_status(format!("Budget {}.", action));
+                        }
+                    }
+                    Err(e) => {
+                        self.set_status(e.user_message());
+                    }
+                }
+            }
+            Err(_errors) => {
+                // Errors are displayed in the form itself.
+            }
+        }
+    }
+
+    fn save_recurring_form(&mut self) {
+        let Some(ref mut form) = self.recurring_form else {
+            return;
+        };
+
+        let is_editing = form.editing_id.is_some();
+
+        match form.to_recurring() {
+            Ok(entry) => {
+                let repo = RecurringRepo::new(&self.db);
+                let result = if is_editing {
+                    repo.update(&entry).map(|_| entry.id.unwrap_or(0))
+                } else {
+                    repo.create(&entry)
+                };
+
+                match result {
+                    Ok(_) => {
+                        self.recurring_form = None;
+                        self.mode = Mode::Normal;
+                        if let Err(e) = self.reload_recurring() {
+                            self.set_status(e.user_message());
+                        } else {
+                            let action = if is_editing { "updated" } else { "created" };
+                            self.set_status(format!("Recurring entry {}.", action));
                         }
                     }
                     Err(e) => {
@@ -1197,11 +1392,38 @@ impl App {
         let mut count = 0u32;
 
         for entry in &active_entries {
-            let last = entry.last_inserted_date.unwrap_or(entry.start_date);
-            let next_due = next_date(last, entry.interval);
+            let Some(last) = entry.last_inserted_date else {
+                // No last_inserted_date means never run yet.
+                // For Monthly/Yearly, compute the first occurrence relative to today.
+                let next_due = next_date(
+                    today - chrono::Duration::days(1),
+                    entry.interval,
+                    entry.day_of_month,
+                    entry.month,
+                );
+                if next_due <= today {
+                    let tx = Transaction {
+                        id: None,
+                        source: entry.source.clone(),
+                        amount: entry.amount,
+                        kind: entry.kind,
+                        tag_id: entry.tag_id,
+                        date: next_due,
+                        notes: Some(format!("Auto: recurring {}", entry.interval)),
+                        created_at: None,
+                        updated_at: None,
+                    };
+                    tx_repo.create(&tx)?;
+                    if let Some(id) = entry.id {
+                        rec_repo.update_last_inserted(id, next_due)?;
+                    }
+                    count += 1;
+                }
+                continue;
+            };
+            let next_due = next_date(last, entry.interval, entry.day_of_month, entry.month);
 
             if next_due <= today {
-                // Insert the transaction.
                 let tx = Transaction {
                     id: None,
                     source: entry.source.clone(),
@@ -1215,7 +1437,6 @@ impl App {
                 };
                 tx_repo.create(&tx)?;
 
-                // Update last_inserted_date.
                 if let Some(id) = entry.id {
                     rec_repo.update_last_inserted(id, next_due)?;
                 }
@@ -1232,25 +1453,61 @@ impl App {
     }
 }
 
-/// Calculate the next date after `from` according to the given interval.
-fn next_date(from: chrono::NaiveDate, interval: RecurringInterval) -> chrono::NaiveDate {
+/// Return the last day of a given year/month.
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)
+        .unwrap()
+        .pred_opt()
+        .unwrap()
+        .day()
+}
+
+/// Calculate the next date after `from` according to the given interval,
+/// using `day_of_month` (for Monthly/Yearly) and `month` (for Yearly).
+fn next_date(
+    from: chrono::NaiveDate,
+    interval: RecurringInterval,
+    day_of_month: Option<u32>,
+    month: Option<u32>,
+) -> chrono::NaiveDate {
     match interval {
         RecurringInterval::Daily => from + chrono::Duration::days(1),
         RecurringInterval::Weekly => from + chrono::Duration::weeks(1),
         RecurringInterval::Monthly => {
-            let month = from.month();
-            let year = from.year();
-            if month == 12 {
-                chrono::NaiveDate::from_ymd_opt(year + 1, 1, from.day().min(28))
-                    .unwrap_or(from + chrono::Duration::days(30))
+            let target_day = day_of_month.unwrap_or(1);
+            // Try next month from `from`.
+            let (mut y, mut m) = (from.year(), from.month());
+            // Move to next month.
+            if m == 12 { y += 1; m = 1; } else { m += 1; }
+            let clamped = target_day.min(last_day_of_month(y, m));
+            let candidate = chrono::NaiveDate::from_ymd_opt(y, m, clamped).unwrap();
+            // If candidate is not strictly after `from`, advance one more month.
+            if candidate <= from {
+                if m == 12 { y += 1; m = 1; } else { m += 1; }
+                let clamped = target_day.min(last_day_of_month(y, m));
+                chrono::NaiveDate::from_ymd_opt(y, m, clamped).unwrap()
             } else {
-                chrono::NaiveDate::from_ymd_opt(year, month + 1, from.day().min(28))
-                    .unwrap_or(from + chrono::Duration::days(30))
+                candidate
             }
         }
         RecurringInterval::Yearly => {
-            chrono::NaiveDate::from_ymd_opt(from.year() + 1, from.month(), from.day().min(28))
-                .unwrap_or(from + chrono::Duration::days(365))
+            let target_month = month.unwrap_or(1);
+            let target_day = day_of_month.unwrap_or(1);
+            let mut y = from.year() + 1;
+            let clamped = target_day.min(last_day_of_month(y, target_month));
+            let candidate = chrono::NaiveDate::from_ymd_opt(y, target_month, clamped).unwrap();
+            if candidate <= from {
+                y += 1;
+                let clamped = target_day.min(last_day_of_month(y, target_month));
+                chrono::NaiveDate::from_ymd_opt(y, target_month, clamped).unwrap()
+            } else {
+                candidate
+            }
         }
     }
 }

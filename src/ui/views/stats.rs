@@ -463,7 +463,7 @@ fn draw_trends_table(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
 /// Calculate pace projection for a budget.
 /// Returns (projected_total, days_elapsed, total_days).
-fn budget_pace_projection(budget: &crate::domain::models::Budget, spent: i64) -> (i64, u32, u32) {
+pub fn budget_pace_projection(budget: &crate::domain::models::Budget, spent: i64) -> (i64, u32, u32) {
     use chrono::{Datelike, Local, NaiveDate};
     use crate::domain::models::BudgetPeriod;
 

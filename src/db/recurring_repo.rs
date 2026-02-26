@@ -18,15 +18,16 @@ impl<'a> RecurringRepo<'a> {
     pub fn create(&self, entry: &RecurringEntry) -> Result<i64> {
         self.db.conn().execute(
             "INSERT INTO recurring_entries
-                (source, amount, kind, tag_id, interval, start_date, last_inserted_date, active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (source, amount, kind, tag_id, interval, start_date, day_of_month, month, last_inserted_date, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, '2000-01-01', ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 entry.source,
                 entry.amount,
                 entry.kind.to_string(),
                 entry.tag_id,
                 entry.interval.to_string(),
-                entry.start_date.to_string(),
+                entry.day_of_month.map(|d| d as i64),
+                entry.month.map(|m| m as i64),
                 entry.last_inserted_date.map(|d| d.to_string()),
                 entry.active as i32,
             ],
@@ -40,7 +41,7 @@ impl<'a> RecurringRepo<'a> {
             .conn()
             .query_row(
                 "SELECT id, source, amount, kind, tag_id, interval,
-                        start_date, last_inserted_date, active
+                        day_of_month, month, last_inserted_date, active
                  FROM recurring_entries WHERE id = ?1",
                 rusqlite::params![id],
                 row_to_recurring,
@@ -57,7 +58,7 @@ impl<'a> RecurringRepo<'a> {
     pub fn get_all(&self) -> Result<Vec<RecurringEntry>> {
         let mut stmt = self.db.conn().prepare(
             "SELECT id, source, amount, kind, tag_id, interval,
-                    start_date, last_inserted_date, active
+                    day_of_month, month, last_inserted_date, active
              FROM recurring_entries ORDER BY id",
         )?;
         let entries = stmt
@@ -70,7 +71,7 @@ impl<'a> RecurringRepo<'a> {
     pub fn get_active(&self) -> Result<Vec<RecurringEntry>> {
         let mut stmt = self.db.conn().prepare(
             "SELECT id, source, amount, kind, tag_id, interval,
-                    start_date, last_inserted_date, active
+                    day_of_month, month, last_inserted_date, active
              FROM recurring_entries WHERE active = 1 ORDER BY id",
         )?;
         let entries = stmt
@@ -87,15 +88,16 @@ impl<'a> RecurringRepo<'a> {
         let affected = self.db.conn().execute(
             "UPDATE recurring_entries
              SET source = ?1, amount = ?2, kind = ?3, tag_id = ?4,
-                 interval = ?5, start_date = ?6, last_inserted_date = ?7, active = ?8
-             WHERE id = ?9",
+                 interval = ?5, day_of_month = ?6, month = ?7, last_inserted_date = ?8, active = ?9
+             WHERE id = ?10",
             rusqlite::params![
                 entry.source,
                 entry.amount,
                 entry.kind.to_string(),
                 entry.tag_id,
                 entry.interval.to_string(),
-                entry.start_date.to_string(),
+                entry.day_of_month.map(|d| d as i64),
+                entry.month.map(|m| m as i64),
                 entry.last_inserted_date.map(|d| d.to_string()),
                 entry.active as i32,
                 id,
@@ -135,7 +137,7 @@ impl<'a> RecurringRepo<'a> {
     pub fn get_by_tag(&self, tag_id: i64) -> Result<Vec<RecurringEntry>> {
         let mut stmt = self.db.conn().prepare(
             "SELECT id, source, amount, kind, tag_id, interval,
-                    start_date, last_inserted_date, active
+                    day_of_month, month, last_inserted_date, active
              FROM recurring_entries WHERE tag_id = ?1 ORDER BY id",
         )?;
         let entries = stmt
@@ -168,6 +170,9 @@ impl<'a> RecurringRepo<'a> {
 }
 
 /// Map a row from the `recurring_entries` table to a [`RecurringEntry`].
+///
+/// Column order: id(0), source(1), amount(2), kind(3), tag_id(4), interval(5),
+///               day_of_month(6), month(7), last_inserted_date(8), active(9)
 fn row_to_recurring(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecurringEntry> {
     let kind_str: String = row.get(3)?;
     let kind: TransactionKind = kind_str
@@ -179,16 +184,14 @@ fn row_to_recurring(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecurringEntry>
         .parse()
         .map_err(|e: AppError| rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e)))?;
 
-    let start_date_str: String = row.get(6)?;
-    let start_date = NaiveDate::parse_from_str(&start_date_str, "%Y-%m-%d").map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
-    })?;
+    let day_of_month: Option<i64> = row.get(6)?;
+    let month: Option<i64> = row.get(7)?;
 
-    let last_inserted_str: Option<String> = row.get(7)?;
+    let last_inserted_str: Option<String> = row.get(8)?;
     let last_inserted_date = last_inserted_str
-        .and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
 
-    let active_int: i32 = row.get(8)?;
+    let active_int: i32 = row.get(9)?;
 
     Ok(RecurringEntry {
         id: row.get(0)?,
@@ -197,7 +200,8 @@ fn row_to_recurring(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecurringEntry>
         kind,
         tag_id: row.get(4)?,
         interval,
-        start_date,
+        day_of_month: day_of_month.map(|d| d as u32),
+        month: month.map(|m| m as u32),
         last_inserted_date,
         active: active_int != 0,
     })
@@ -231,7 +235,8 @@ mod tests {
             kind: TransactionKind::Expense,
             tag_id: 1,
             interval: RecurringInterval::Monthly,
-            start_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            day_of_month: Some(1),
+            month: None,
             last_inserted_date: None,
             active: true,
         }

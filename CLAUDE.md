@@ -35,12 +35,14 @@ cargo run -- --help                # Show CLI help
 
 - `App` - Central state: current `View`, `Mode`, cached data, selection indices, form state
 - `View` enum - `Dashboard | Transactions | Stats | Budgets | Recurring | Tags`
-- `Mode` enum - `Normal | Adding | Editing | Confirming(String) | Filtering | TagEditing | TagDeleting | Help`
+- `Mode` enum - `Normal | Adding | Editing | Confirming(String) | Filtering | BudgetAdding | BudgetEditing | RecurringAdding | RecurringEditing | TagEditing | TagDeleting | Help`
 - `AppCommand` - All possible user actions (defined in `event.rs`)
 - `TransactionForm` - Form state for add/edit (defined in `ui/views/form.rs`)
 - `TransactionFilter` - Dynamic query filters (defined in `db/transaction_repo.rs`)
 - `TagForm` - Tag add/edit form state (defined in `ui/views/tags.rs`)
 - `TagDeleteInfo` - Tag delete modal state with reassignment (defined in `ui/views/tags.rs`)
+- `BudgetForm` - Budget add/edit form state (defined in `ui/views/budget.rs`)
+- `RecurringForm` - Recurring entry add/edit form state (defined in `ui/views/recurring.rs`)
 - `SortColumn` / `SortDirection` - Transaction table sorting state
 - `OverviewPeriod` enum - `Monthly | Yearly` for Stats Overview time filter
 - Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets), `stats_months_range` (6/12/24), `stats_overview_period`, `overview_totals`, `overview_prev_totals`, `overview_expense_by_tag`
@@ -70,7 +72,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - All queries use parameterized `rusqlite::params![]` — never interpolate user data into SQL
 - Repos take `&Database` references, not raw `Connection`
 - Schema lives in `Database::initialize_schema()` in `connection.rs`
-- Migrations use `PRAGMA user_version` (currently at version 1)
+- Migrations use `PRAGMA user_version` (currently at version 2)
 - Foreign keys are enforced, WAL mode is enabled
 
 ### UI / Ratatui patterns
