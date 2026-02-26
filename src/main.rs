@@ -146,6 +146,45 @@ struct Cli {
             Fails if any transactions or recurring entries reference the tag.\n\
             Reassign them first or delete them before removing the tag.")]
     delete_tag: Option<String>,
+
+    // -- Reports --
+
+    /// Generate a report (monthly, yearly, compare)
+    #[arg(long, help_heading = "Reports", num_args = 1..,
+        long_help = "Generate a financial report.\n\
+            Usage:\n\
+            --report monthly              Current month\n\
+            --report monthly 2026-01      Specific month\n\
+            --report yearly               Current year\n\
+            --report yearly 2025          Specific year\n\
+            --report compare 2026-01 2026-02")]
+    report: Option<Vec<String>>,
+
+    /// Output file for --report (Markdown format)
+    #[arg(long, help_heading = "Reports",
+        long_help = "Write report to a Markdown file instead of terminal.\n\
+            Example: --report monthly --output report.md")]
+    output: Option<std::path::PathBuf>,
+
+    // -- AI --
+
+    /// Generate AI insights for a period (requires Ollama)
+    #[arg(long, help_heading = "AI",
+        long_help = "Generate AI-powered spending insights.\n\
+            Requires Ollama running locally with a model.\n\
+            Configure [ai] section in config.toml.\n\
+            Usage:\n\
+            --insights              Current month\n\
+            --insights 2026-01      Specific month\n\
+            --insights 2025         Full year")]
+    insights: Option<Option<String>>,
+
+    /// Ask a natural language question about your finances (requires Ollama)
+    #[arg(long, help_heading = "AI",
+        long_help = "Search transactions using natural language.\n\
+            Requires Ollama running locally.\n\
+            Example: --ask \"how much did I spend on food last month\"")]
+    ask: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -202,6 +241,15 @@ fn main() -> Result<()> {
             notes: cli.notes,
         };
         return cointui::cli::add::run(source, args, &db, &config);
+    }
+    if let Some(report_args) = cli.report {
+        return cointui::cli::report::run(&report_args, cli.output, &db, &config);
+    }
+    if let Some(month_opt) = cli.insights {
+        return cointui::cli::insights::run(month_opt.as_deref(), &db, &config);
+    }
+    if let Some(query) = cli.ask {
+        return cointui::cli::ask::run(&query, &db, &config);
     }
 
     let db_path_display = db_path.display().to_string();

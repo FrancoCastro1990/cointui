@@ -84,7 +84,10 @@ fn view_keys(view: View) -> (&'static str, Vec<(&'static str, &'static str)>) {
             ("S", "Toggle sort direction"),
         ]),
         View::Stats => ("Stats", vec![
-            ("(none)", "View-only statistics"),
+            ("h/Left", "Previous sub-tab"),
+            ("l/Right", "Next sub-tab"),
+            ("m", "Toggle period/range"),
+            ("g", "Generate AI insights"),
         ]),
         View::Budgets => ("Budgets", vec![
             ("j/Down", "Move down"),

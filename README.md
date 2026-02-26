@@ -11,7 +11,10 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Hierarchical tags** — Organize transactions with categories and subcategories (e.g., Comida > Restaurantes)
 - **Budgets with alerts** — Set spending limits per category or globally (weekly/monthly/yearly) with visual progress bars and warnings at 80%+ usage
 - **Recurring transactions** — Full CRUD for recurring entries (daily/weekly/monthly/yearly) with configurable day-of-month and month; auto-insert on startup
-- **Statistics** — Three sub-tabs (Overview, Trends, Budgets) with totals, savings rate gauge, expense breakdown by tag, monthly trends with configurable range (6/12/24 months), and budget status gauges
+- **Statistics** — Four sub-tabs (Overview, Trends, Budgets, AI Insights) with totals, savings rate gauge, expense breakdown by tag, monthly trends with configurable range (6/12/24 months), budget status gauges, and AI-generated insights
+- **AI insights** — Local AI-powered spending analysis via Ollama: monthly/yearly insights with trend detection, anomalies, and savings opportunities (press `g` in Stats > AI Insights tab)
+- **Smart search** — Natural language transaction search via Ollama (e.g., `--ask "how much did I spend on food last month"`)
+- **Reports** — Generate monthly, yearly, or comparison reports in terminal or Markdown format
 - **Filtering** — Search transactions by text, date range, amount range, kind, and tag
 - **Tag management** — Create, rename, and delete tags from CLI or TUI with safe reassignment when tags are in use
 - **CLI quick-add** — Add transactions directly from the command line without entering the TUI
@@ -20,7 +23,8 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Database backup/restore** — Create and restore full database backups
 - **Persistent storage** — SQLite database with WAL mode, automatic schema migrations, and safe parameterized queries
 - **Locale-aware formatting** — Configurable thousands/decimal separators (default: Chilean format `$ 2.700.000,00`)
-- **Configurable** — TOML config for currency symbol, number format, and database path
+- **Configurable** — TOML config for currency symbol, number format, database path, and AI settings
+- **Privacy-first** — All data stays local: SQLite database, local Ollama for AI — nothing leaves your machine
 
 ## Installation
 
@@ -37,7 +41,8 @@ The binary will be at `target/release/cointui`.
 ### Requirements
 
 - Rust 2024 edition (1.85+)
-- No external dependencies — SQLite is bundled via `rusqlite`
+- No external runtime dependencies — SQLite is bundled via `rusqlite`
+- Optional: [Ollama](https://ollama.ai) for AI features
 
 ## Usage
 
@@ -109,6 +114,45 @@ cointui --backup /path/to/backup.db
 cointui --restore /path/to/backup.db
 ```
 
+### Reports
+
+```bash
+# Monthly report (current month, terminal output)
+cointui --report monthly
+
+# Monthly report for a specific month
+cointui --report monthly 2026-01
+
+# Yearly report
+cointui --report yearly
+cointui --report yearly 2025
+
+# Compare two months
+cointui --report compare 2026-01 2026-02
+
+# Export report to Markdown
+cointui --report monthly --output report.md
+```
+
+### AI Features (requires Ollama)
+
+```bash
+# Generate spending insights for the current month
+cointui --insights
+
+# Insights for a specific month
+cointui --insights 2026-01
+
+# Insights for a full year
+cointui --insights 2025
+
+# Natural language search
+cointui --ask "how much did I spend on food last month"
+cointui --ask "cuanto gaste en uber el trimestre pasado"
+```
+
+> **Setup**: Install [Ollama](https://ollama.ai), pull a model (`ollama pull qwen2.5:14b`), and enable AI in your config (see [Configuration](#configuration)).
+
 ## Keybindings
 
 ### Global
@@ -154,7 +198,8 @@ cointui --restore /path/to/backup.db
 |-----|--------|
 | `h` / `Left` | Previous sub-tab |
 | `l` / `Right` | Next sub-tab |
-| `m` | Cycle month range (6 / 12 / 24) |
+| `m` | Toggle period / cycle month range |
+| `g` | Generate AI insights (AI Insights tab) |
 
 ### Recurring entries
 
@@ -199,11 +244,12 @@ Full scrollable list with all transactions, filterable by text, date, amount, ki
 
 ### 3. Stats
 
-Three sub-tabs navigable with `h`/`l`:
+Four sub-tabs navigable with `h`/`l`:
 
 - **Overview** — Income/Balance/Expenses header, savings rate gauge, and expense breakdown by tag with horizontal bars and percentages
 - **Trends** — Monthly income vs. expenses with line gauges, configurable range (6/12/24 months via `m` key)
 - **Budgets** — Budget progress gauges with on-track/warning/over-budget summary
+- **AI Insights** — AI-generated spending analysis via Ollama (press `g` to generate)
 
 ### 4. Budgets
 
@@ -227,6 +273,12 @@ A default config is auto-created on first run:
 currency = "$"
 thousands_separator = "."
 decimal_separator = ","
+
+[ai]
+enabled = false
+ollama_url = "http://localhost:11434"
+ollama_model = "qwen2.5:14b"
+timeout_secs = 30
 ```
 
 ### Options
@@ -237,6 +289,15 @@ decimal_separator = ","
 | `thousands_separator` | String | `"."` | Thousands grouping separator (e.g. `"."` for `1.000`, `","` for `1,000`) |
 | `decimal_separator` | String | `","` | Decimal separator (e.g. `","` for `1.000,50`, `"."` for `1,000.50`) |
 | `db_path` | String | (auto) | Override database file path |
+
+### AI Options (`[ai]` section)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | Bool | `false` | Enable AI features (requires Ollama) |
+| `ollama_url` | String | `"http://localhost:11434"` | Ollama API endpoint |
+| `ollama_model` | String | `"qwen2.5:14b"` | Ollama model to use |
+| `timeout_secs` | Integer | `30` | Request timeout in seconds |
 
 ## Data storage
 
@@ -259,8 +320,14 @@ src/
 ├── event.rs             # Event bus (crossterm events + tick)
 ├── error.rs             # Error types (thiserror)
 ├── config.rs            # TOML configuration
+├── ai/
+│   ├── ollama.rs        # OllamaClient (sync HTTP via ureq)
+│   └── prompts.rs       # Prompt templates for insights and search
 ├── cli/
 │   ├── add.rs           # --add transaction from CLI
+│   ├── ask.rs           # --ask natural language search
+│   ├── insights.rs      # --insights AI spending analysis
+│   ├── report.rs        # --report monthly/yearly/compare
 │   ├── tags.rs          # --tags, --add-tag, --rename-tag, --delete-tag
 │   ├── import.rs        # --import CSV with column mapping
 │   ├── export.rs        # --export to CSV/JSON
@@ -299,10 +366,11 @@ src/
 | [chrono](https://github.com/chronotope/chrono) | 0.4 | Date/time handling |
 | [clap](https://github.com/clap-rs/clap) | 4 | CLI argument parsing |
 | [serde](https://serde.rs) + [toml](https://github.com/toml-rs/toml) | 1 / 0.8 | Config serialization |
-| [serde_json](https://github.com/serde-rs/json) | 1 | JSON export |
+| [serde_json](https://github.com/serde-rs/json) | 1 | JSON export/AI response parsing |
 | [thiserror](https://github.com/dtolnay/thiserror) | 2 | Error derivation |
 | [csv](https://github.com/BurntSushi/rust-csv) | 1.3 | CSV import/export |
 | [directories](https://github.com/dirs-dev/directories-rs) | 6 | XDG paths |
+| [ureq](https://github.com/algesten/ureq) | 3 | Sync HTTP client (Ollama API) |
 
 ## Development
 
@@ -320,6 +388,9 @@ cargo build --release
 - [x] Tag management (CLI + TUI)
 - [x] Stats redesign with sub-tabs (Overview, Trends, Budgets)
 - [x] Recurring CRUD with configurable intervals (day of month, month)
+- [x] AI insights via Ollama (CLI + TUI)
+- [x] Natural language search (`--ask`)
+- [x] Reports (monthly, yearly, compare, Markdown export)
 
 ## License
 

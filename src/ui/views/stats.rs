@@ -10,7 +10,7 @@ use crate::domain::models::format_cents;
 use crate::ui::theme;
 
 /// Sub-tab titles for the Stats view.
-const STATS_TABS: [&str; 3] = ["Overview", "Trends", "Budgets"];
+const STATS_TABS: [&str; 4] = ["Overview", "Trends", "Budgets", "AI Insights"];
 
 /// Main entry point: draws sub-tab bar, routes to the active sub-tab, draws footer.
 pub fn draw_stats(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -34,6 +34,7 @@ pub fn draw_stats(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         0 => draw_overview(frame, app, content_area),
         1 => draw_trends(frame, app, content_area),
         2 => draw_budgets(frame, app, content_area),
+        3 => draw_ai_insights(frame, app, content_area),
         _ => draw_overview(frame, app, content_area),
     }
 
@@ -636,28 +637,124 @@ fn draw_budgets(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 // ---------------------------------------------------------------------------
+// AI Insights sub-tab
+// ---------------------------------------------------------------------------
+
+fn draw_ai_insights(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = theme::styled_block(" AI Insights ");
+
+    if app.ai_loading {
+        let para = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Generating insights... please wait.",
+                theme::header_style(),
+            )),
+        ])
+        .block(block)
+        .alignment(Alignment::Center);
+        frame.render_widget(para, area);
+        return;
+    }
+
+    if app.ai_insights.is_empty() {
+        let enabled = app.config.ai.enabled;
+        let lines = if enabled {
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No insights generated yet.",
+                    theme::muted_style(),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Press ", theme::muted_style()),
+                    Span::styled("[g]", theme::header_style()),
+                    Span::styled(" to generate AI insights for the current period.", theme::muted_style()),
+                ]),
+            ]
+        } else {
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "AI is disabled.",
+                    theme::muted_style(),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enable [ai] in config.toml and set enabled = true.",
+                    theme::muted_style(),
+                )),
+                Line::from(Span::styled(
+                    "  Requires Ollama running locally.",
+                    theme::muted_style(),
+                )),
+            ]
+        };
+        let para = Paragraph::new(lines)
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(para, area);
+        return;
+    }
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+
+    for (i, insight) in app.ai_insights.iter().enumerate() {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {}. ", i + 1), theme::header_style()),
+            Span::styled(insight.clone(), theme::text_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("  Press ", theme::muted_style()),
+        Span::styled("[g]", theme::header_style()),
+        Span::styled(" to regenerate.", theme::muted_style()),
+    ]));
+
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, inner);
+}
+
+// ---------------------------------------------------------------------------
 // Footer
 // ---------------------------------------------------------------------------
 
 fn draw_stats_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let m_label = if app.stats_tab == 0 {
+    let mut spans = vec![
+        Span::styled(" [h/l]", theme::header_style()),
+        Span::styled("tab ", theme::text_style()),
+    ];
+
+    if app.stats_tab == 0 {
         let period = match app.stats_overview_period {
             OverviewPeriod::Monthly => "Monthly",
             OverviewPeriod::Yearly => "Yearly",
         };
-        format!("period:{} ", period)
+        spans.push(Span::styled("[m]", theme::header_style()));
+        spans.push(Span::styled(format!("period:{} ", period), theme::text_style()));
+    } else if app.stats_tab == 3 {
+        spans.push(Span::styled("[g]", theme::header_style()));
+        spans.push(Span::styled("generate ", theme::text_style()));
     } else {
-        format!("range:{}mo ", app.stats_months_range)
-    };
-    let help = Line::from(vec![
-        Span::styled(" [h/l]", theme::header_style()),
-        Span::styled("tab ", theme::text_style()),
-        Span::styled("[m]", theme::header_style()),
-        Span::styled(m_label, theme::text_style()),
-        Span::styled("[1-6]", theme::header_style()),
-        Span::styled("view ", theme::text_style()),
-        Span::styled("[?]", theme::header_style()),
-        Span::styled("help", theme::text_style()),
-    ]);
+        spans.push(Span::styled("[m]", theme::header_style()));
+        spans.push(Span::styled(
+            format!("range:{}mo ", app.stats_months_range),
+            theme::text_style(),
+        ));
+    }
+
+    spans.push(Span::styled("[1-6]", theme::header_style()));
+    spans.push(Span::styled("view ", theme::text_style()));
+    spans.push(Span::styled("[?]", theme::header_style()));
+    spans.push(Span::styled("help", theme::text_style()));
+
+    let help = Line::from(spans);
     frame.render_widget(Paragraph::new(help), area);
 }

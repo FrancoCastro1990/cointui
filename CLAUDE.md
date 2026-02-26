@@ -24,12 +24,13 @@ cargo run -- --help                # Show CLI help
 
 ### Layers (top to bottom)
 
-1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`, `--import`, `--export`, `--backup`, `--restore`) that run before TUI launch and exit.
+1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`, `--import`, `--export`, `--backup`, `--restore`, `--report`, `--insights`, `--ask`) that run before TUI launch and exit.
 2. **UI** (`src/ui/`) - Ratatui widgets, views, theme. Renders `&App` state into terminal frames.
 3. **Event** (`src/event.rs`) - `AppCommand` enum + `EventHandler` polling crossterm events.
 4. **App** (`src/app.rs`) - Central state machine. Owns `Database`, dispatches commands, manages cached data.
 5. **Domain** (`src/domain/models.rs`) - Pure data structs: `Transaction`, `Tag`, `Budget`, `RecurringEntry`.
 6. **Repository** (`src/db/`) - SQLite CRUD. Each repo takes `&Database` reference.
+7. **AI** (`src/ai/`) - Ollama integration for AI insights and natural language search. `OllamaClient` (sync HTTP via `ureq`), prompt templates in `prompts.rs`.
 
 ### Key types
 
@@ -45,7 +46,8 @@ cargo run -- --help                # Show CLI help
 - `RecurringForm` - Recurring entry add/edit form state (defined in `ui/views/recurring.rs`)
 - `SortColumn` / `SortDirection` - Transaction table sorting state
 - `OverviewPeriod` enum - `Monthly | Yearly` for Stats Overview time filter
-- Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets), `stats_months_range` (6/12/24), `stats_overview_period`, `overview_totals`, `overview_prev_totals`, `overview_expense_by_tag`
+- Stats sub-tab state: `stats_tab` (0=Overview, 1=Trends, 2=Budgets, 3=AI Insights), `stats_months_range` (6/12/24), `stats_overview_period`, `overview_totals`, `overview_prev_totals`, `overview_expense_by_tag`
+- AI state: `ai_insights: Vec<String>`, `ai_loading: bool` — cached AI-generated insights, triggered by `[g]` key in Stats AI tab
 
 ### Data flow
 
@@ -94,6 +96,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - DB at `~/.local/share/cointui/cointui.db` by default
 - Number format defaults: `thousands_separator = "."`, `decimal_separator = ","` (Chilean). New config fields use `#[serde(default)]` for backward compatibility with existing config files.
 - Tags are managed via CLI (`--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`) or TUI (view 6). Initial seeds are hardcoded as "Other" and "Salary" in `main.rs`.
+- AI config: `[ai]` section with `enabled` (default false), `ollama_url`, `ollama_model`, `timeout_secs`. Uses `#[serde(default)]` for backward compatibility.
 
 ### Adding a new view
 1. Add variant to `View` enum in `app.rs`

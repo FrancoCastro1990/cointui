@@ -6,6 +6,42 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 
+/// AI (Ollama) configuration section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+    #[serde(default = "default_ollama_model")]
+    pub ollama_model: String,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_ollama_url() -> String {
+    "http://localhost:11434".into()
+}
+
+fn default_ollama_model() -> String {
+    "qwen2.5:14b".into()
+}
+
+fn default_timeout_secs() -> u64 {
+    30
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ollama_url: default_ollama_url(),
+            ollama_model: default_ollama_model(),
+            timeout_secs: default_timeout_secs(),
+        }
+    }
+}
+
 /// Application-level configuration persisted as TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -20,6 +56,9 @@ pub struct AppConfig {
     /// Override for the database file path. When `None` the default XDG data
     /// directory is used (`~/.local/share/cointui/cointui.db`).
     pub db_path: Option<PathBuf>,
+    /// AI (Ollama) configuration.
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 fn default_thousands_separator() -> String {
@@ -37,6 +76,7 @@ impl Default for AppConfig {
             thousands_separator: ".".into(),
             decimal_separator: ",".into(),
             db_path: None,
+            ai: AiConfig::default(),
         }
     }
 }

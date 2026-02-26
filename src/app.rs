@@ -164,6 +164,10 @@ pub struct App {
     /// Expense by tag for the selected overview period.
     pub overview_expense_by_tag: Vec<(i64, i64)>,
 
+    // AI insights state.
+    pub ai_insights: Vec<String>,
+    pub ai_loading: bool,
+
     // Whether the app should quit.
     pub should_quit: bool,
 }
@@ -209,6 +213,8 @@ impl App {
             overview_totals: (0, 0),
             overview_prev_totals: (0, 0),
             overview_expense_by_tag: Vec::new(),
+            ai_insights: Vec::new(),
+            ai_loading: false,
             should_quit: false,
         };
         app.reload_all()?;
@@ -381,6 +387,112 @@ impl App {
         self.overview_prev_totals = repo.get_totals_for_period(&fmt(prev_start), &fmt(prev_end))?;
         self.overview_expense_by_tag = repo.get_expense_by_tag_for_period(&fmt(cur_start), &fmt(cur_end))?;
         Ok(())
+    }
+
+    /// Generate AI insights for the current period (blocking).
+    pub fn generate_ai_insights(&mut self) {
+        use crate::ai::ollama::OllamaClient;
+        use crate::ai::prompts;
+
+        let client = match OllamaClient::from_config(&self.config.ai) {
+            Some(c) => c,
+            None => {
+                self.ai_insights = vec![
+                    "AI is disabled. Enable [ai] in config.toml.".into(),
+                ];
+                return;
+            }
+        };
+
+        if !client.is_available() {
+            self.ai_insights = vec![
+                "Ollama is not running. Start it with: ollama serve".into(),
+            ];
+            return;
+        }
+
+        self.ai_loading = true;
+        self.ai_insights.clear();
+
+        let (income, expense) = self.overview_totals;
+        let (prev_income, prev_expense) = self.overview_prev_totals;
+        let c = &self.config.currency;
+        let t = &self.config.thousands_separator;
+        let d = &self.config.decimal_separator;
+
+        let expense_by_tag: Vec<(String, i64, f64)> = self
+            .overview_expense_by_tag
+            .iter()
+            .map(|(tid, amt)| {
+                let pct = if expense > 0 {
+                    *amt as f64 / expense as f64 * 100.0
+                } else {
+                    0.0
+                };
+                (self.tag_name(*tid), *amt, pct)
+            })
+            .collect();
+
+        let budget_status: Vec<(String, i64, i64, f64)> = self
+            .budget_spending
+            .iter()
+            .map(|(b, spent)| {
+                let label = match b.tag_id {
+                    Some(tid) => format!("{} ({})", self.tag_name(tid), b.period),
+                    None => format!("Global ({})", b.period),
+                };
+                let pct = if b.amount > 0 {
+                    *spent as f64 / b.amount as f64 * 100.0
+                } else {
+                    0.0
+                };
+                (label, *spent, b.amount, pct)
+            })
+            .collect();
+
+        let today = chrono::Local::now().date_naive();
+        let period_label = match self.stats_overview_period {
+            OverviewPeriod::Monthly => today.format("%B %Y").to_string(),
+            OverviewPeriod::Yearly => today.year().to_string(),
+        };
+
+        let prompt = prompts::build_insights_prompt(&prompts::InsightsData {
+            period: &period_label,
+            income,
+            expense,
+            prev_income,
+            prev_expense,
+            expense_by_tag: &expense_by_tag,
+            budget_status: &budget_status,
+            monthly_trend: &self.monthly_totals,
+            currency: c,
+            tsep: t,
+            dsep: d,
+        });
+
+        match client.generate(&prompt) {
+            Ok(response) => {
+                let insights: Vec<String> =
+                    serde_json::from_str(&response).unwrap_or_else(|_| {
+                        if let Some(start) = response.find('[') {
+                            if let Some(end) = response.rfind(']') {
+                                let json_str = &response[start..=end];
+                                serde_json::from_str(json_str)
+                                    .unwrap_or_else(|_| vec![response.clone()])
+                            } else {
+                                vec![response.clone()]
+                            }
+                        } else {
+                            vec![response]
+                        }
+                    });
+                self.ai_insights = insights;
+            }
+            Err(e) => {
+                self.ai_insights = vec![format!("Error: {}", e.user_message())];
+            }
+        }
+        self.ai_loading = false;
     }
 
     // -----------------------------------------------------------------------
@@ -812,7 +924,7 @@ impl App {
                 }
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                if self.stats_tab < 2 {
+                if self.stats_tab < 3 {
                     self.stats_tab += 1;
                 }
             }
@@ -836,6 +948,11 @@ impl App {
                     if let Err(e) = self.reload_monthly_totals() {
                         self.set_status(e.user_message());
                     }
+                }
+            }
+            KeyCode::Char('g') => {
+                if self.stats_tab == 3 {
+                    self.generate_ai_insights();
                 }
             }
             _ => {}
