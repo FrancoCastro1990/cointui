@@ -70,7 +70,7 @@ fn global_keys() -> Vec<(&'static str, &'static str)> {
 fn view_keys(view: View) -> (&'static str, Vec<(&'static str, &'static str)>) {
     match view {
         View::Dashboard => ("Dashboard", vec![
-            ("(none)", "Navigate with global keys"),
+            ("S", "Sync Gmail emails"),
         ]),
         View::Transactions => ("Transactions", vec![
             ("j/Down", "Move down"),

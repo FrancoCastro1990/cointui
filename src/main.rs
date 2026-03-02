@@ -185,6 +185,16 @@ struct Cli {
             Requires Ollama running locally.\n\
             Example: --ask \"how much did I spend on food last month\"")]
     ask: Option<String>,
+
+    // -- Email Sync --
+
+    /// Sync transactions from Gmail bank notification emails
+    #[arg(long, help_heading = "Email Sync",
+        long_help = "Sync transactions from Gmail bank notification emails.\n\
+            Requires [gmail] section in config.toml with enabled = true.\n\
+            Supports Santander Chile, CMR Falabella, and Scotiabank Chile.\n\
+            Set COINTUI_GMAIL_PASSWORD env var or app_password in config.")]
+    sync_email: bool,
 }
 
 fn main() -> Result<()> {
@@ -251,6 +261,9 @@ fn main() -> Result<()> {
     if let Some(query) = cli.ask {
         return cointui::cli::ask::run(&query, &db, &config);
     }
+    if cli.sync_email {
+        return cointui::cli::sync_email::run(&db, &config);
+    }
 
     let db_path_display = db_path.display().to_string();
 
@@ -291,6 +304,7 @@ fn main() -> Result<()> {
             }
             AppEvent::Tick => {
                 app.tick_status();
+                app.check_email_sync();
             }
             AppEvent::Resize(_, _) => {
                 // Terminal handles resize automatically via ratatui.

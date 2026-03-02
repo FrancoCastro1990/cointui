@@ -277,6 +277,8 @@ pub fn draw_dashboard_footer(frame: &mut Frame, area: ratatui::layout::Rect) {
         Span::styled("Budgets ", theme::text_style()),
         Span::styled("[5]", theme::header_style()),
         Span::styled("Recurring ", theme::text_style()),
+        Span::styled("[S]", theme::header_style()),
+        Span::styled("ync Email ", theme::text_style()),
         Span::styled("[q]", theme::expense_style()),
         Span::styled("Quit", theme::text_style()),
     ]);

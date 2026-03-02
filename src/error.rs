@@ -18,6 +18,9 @@ pub enum AppError {
 
     #[error("Not found: {0}")]
     NotFound(String),
+
+    #[error("Email sync: {0}")]
+    EmailSync(String),
 }
 
 impl AppError {
@@ -31,6 +34,7 @@ impl AppError {
             AppError::Csv(_) => "Error processing CSV file. Check the file format.".into(),
             AppError::Validation(msg) => msg.clone(),
             AppError::NotFound(msg) => format!("Not found: {msg}"),
+            AppError::EmailSync(msg) => format!("Email sync: {msg}"),
         }
     }
 }

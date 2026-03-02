@@ -6,6 +6,76 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 
+/// A keyword-to-tag mapping rule for email sync tag assignment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagRule {
+    pub keyword: String,
+    pub tag: String,
+}
+
+/// Gmail IMAP configuration for email sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GmailConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub email: String,
+    pub app_password: Option<String>,
+    #[serde(default = "default_imap_host")]
+    pub imap_host: String,
+    #[serde(default = "default_imap_port")]
+    pub imap_port: u16,
+    #[serde(default = "default_lookback_days")]
+    pub lookback_days: u32,
+    #[serde(default)]
+    pub tag_rules: Vec<TagRule>,
+    #[serde(default)]
+    pub ai_tag_fallback: bool,
+    #[serde(default)]
+    pub rules_prompt: String,
+}
+
+fn default_imap_host() -> String {
+    "imap.gmail.com".into()
+}
+
+fn default_imap_port() -> u16 {
+    993
+}
+
+fn default_lookback_days() -> u32 {
+    90
+}
+
+impl Default for GmailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            email: String::new(),
+            app_password: None,
+            imap_host: default_imap_host(),
+            imap_port: default_imap_port(),
+            lookback_days: default_lookback_days(),
+            tag_rules: Vec::new(),
+            ai_tag_fallback: false,
+            rules_prompt: String::new(),
+        }
+    }
+}
+
+impl GmailConfig {
+    /// Resolve the Gmail app password. Checks `COINTUI_GMAIL_PASSWORD` env var
+    /// first, then falls back to `app_password` in config.
+    pub fn resolve_password(&self) -> Option<String> {
+        if let Ok(pw) = std::env::var("COINTUI_GMAIL_PASSWORD")
+            && !pw.is_empty()
+        {
+            return Some(pw);
+        }
+        self.app_password.clone()
+    }
+}
+
 /// AI (Ollama) configuration section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
@@ -59,6 +129,9 @@ pub struct AppConfig {
     /// AI (Ollama) configuration.
     #[serde(default)]
     pub ai: AiConfig,
+    /// Gmail IMAP sync configuration.
+    #[serde(default)]
+    pub gmail: GmailConfig,
 }
 
 fn default_thousands_separator() -> String {
@@ -77,6 +150,7 @@ impl Default for AppConfig {
             decimal_separator: ",".into(),
             db_path: None,
             ai: AiConfig::default(),
+            gmail: GmailConfig::default(),
         }
     }
 }

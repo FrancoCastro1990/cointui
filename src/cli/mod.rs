@@ -5,4 +5,5 @@ pub mod export;
 pub mod import;
 pub mod insights;
 pub mod report;
+pub mod sync_email;
 pub mod tags;

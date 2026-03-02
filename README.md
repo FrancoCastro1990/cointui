@@ -24,6 +24,8 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Persistent storage** — SQLite database with WAL mode, automatic schema migrations, and safe parameterized queries
 - **Locale-aware formatting** — Configurable thousands/decimal separators (default: Chilean format `$ 2.700.000,00`)
 - **Configurable** — TOML config for currency symbol, number format, database path, and AI settings
+- **Email sync** — Automatic transaction import from Gmail bank notifications (Santander, Scotiabank, CMR Falabella) via IMAP with deduplication
+- **AI rules engine** — Natural language rules for smart tag assignment during email sync (e.g., "transfers to KARINA of $300.000 → Pensión", "transfers from FRANCO CASTRO → SKIP")
 - **Privacy-first** — All data stays local: SQLite database, local Ollama for AI — nothing leaves your machine
 
 ## Installation
@@ -133,6 +135,15 @@ cointui --report compare 2026-01 2026-02
 # Export report to Markdown
 cointui --report monthly --output report.md
 ```
+
+### Email sync (Gmail)
+
+```bash
+# Sync bank notification emails and import transactions
+cointui --sync-email
+```
+
+Supported banks: Santander, Scotiabank, CMR Falabella. Requires Gmail app password (see [Gmail Config](#gmail-options-gmail-section)).
 
 ### AI Features (requires Ollama)
 
@@ -299,6 +310,37 @@ timeout_secs = 30
 | `ollama_model` | String | `"qwen2.5:14b"` | Ollama model to use |
 | `timeout_secs` | Integer | `30` | Request timeout in seconds |
 
+### Gmail Options (`[gmail]` section)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | Bool | `false` | Enable Gmail email sync |
+| `email` | String | `""` | Gmail address |
+| `app_password` | String | (none) | Gmail app password (or use `COINTUI_GMAIL_PASSWORD` env var) |
+| `imap_host` | String | `"imap.gmail.com"` | IMAP server host |
+| `imap_port` | Integer | `993` | IMAP server port |
+| `lookback_days` | Integer | `90` | How many days back to search for emails |
+| `ai_tag_fallback` | Bool | `false` | Use AI to assign tags when no rule matches |
+| `rules_prompt` | String | `""` | Natural language rules for AI tag assignment (see below) |
+| `tag_rules` | Array | `[]` | Keyword-based tag rules (simple matching) |
+
+#### AI Rules Engine
+
+When `rules_prompt` is set, each synced transaction is sent to Ollama with your rules for smart tag assignment. Rules are written in natural language:
+
+```toml
+[gmail]
+rules_prompt = """
+- Transfers to KARINA OLIVERO of exactly $300.000 → tag "Pensión"
+- Transfers to KARINA OLIVERO of any other amount → tag "Otros"
+- Transfers from FRANCO CASTRO → SKIP (own-account transfer)
+- Payments for Metrogas, Enel, Aguas Andinas → tag "Departamento"
+- Supermarket purchases (Lider, Jumbo, Santa Isabel) → tag "Comida"
+"""
+```
+
+The AI can reply with a tag name or "SKIP" to ignore a transaction. If no rule matches, it assigns the most appropriate tag from your tag list.
+
 ## Data storage
 
 - **Database**: SQLite at `~/.local/share/cointui/cointui.db`
@@ -309,7 +351,7 @@ timeout_secs = 30
 
 ### Schema
 
-Four tables: `tags`, `transactions`, `budgets`, `recurring_entries`. See `src/db/connection.rs` for the full schema.
+Five tables: `tags`, `transactions`, `budgets`, `recurring_entries`, `processed_emails`. See `src/db/connection.rs` for the full schema.
 
 ## Architecture
 
@@ -322,12 +364,13 @@ src/
 ├── config.rs            # TOML configuration
 ├── ai/
 │   ├── ollama.rs        # OllamaClient (sync HTTP via ureq)
-│   └── prompts.rs       # Prompt templates for insights and search
+│   └── prompts.rs       # Prompt templates for insights, search, and AI rules
 ├── cli/
 │   ├── add.rs           # --add transaction from CLI
 │   ├── ask.rs           # --ask natural language search
 │   ├── insights.rs      # --insights AI spending analysis
 │   ├── report.rs        # --report monthly/yearly/compare
+│   ├── sync_email.rs    # --sync-email Gmail sync
 │   ├── tags.rs          # --tags, --add-tag, --rename-tag, --delete-tag
 │   ├── import.rs        # --import CSV with column mapping
 │   ├── export.rs        # --export to CSV/JSON
@@ -339,7 +382,12 @@ src/
 │   ├── transaction_repo.rs  # Transaction CRUD + filtering
 │   ├── tag_repo.rs      # Tag CRUD (hierarchical)
 │   ├── budget_repo.rs   # Budget CRUD + spent calculation
-│   └── recurring_repo.rs    # Recurring entry CRUD
+│   ├── recurring_repo.rs    # Recurring entry CRUD
+│   └── email_repo.rs    # Processed email deduplication
+├── email/
+│   ├── imap_client.rs   # IMAP connection and email fetching
+│   ├── sync.rs          # Sync orchestration, AI rules engine
+│   └── parsers/         # Bank-specific email parsers (Santander, Scotiabank, CMR)
 └── ui/
     ├── theme.rs         # Tokyo Night color palette
     └── views/
@@ -371,12 +419,16 @@ src/
 | [csv](https://github.com/BurntSushi/rust-csv) | 1.3 | CSV import/export |
 | [directories](https://github.com/dirs-dev/directories-rs) | 6 | XDG paths |
 | [ureq](https://github.com/algesten/ureq) | 3 | Sync HTTP client (Ollama API) |
+| [imap](https://crates.io/crates/imap) | 2.4 | IMAP client for Gmail |
+| [native-tls](https://crates.io/crates/native-tls) | 0.2 | TLS for IMAP |
+| [mailparse](https://crates.io/crates/mailparse) | 0.15 | Email MIME parsing |
+| [regex](https://crates.io/crates/regex) | 1 | Bank email content extraction |
 
 ## Development
 
 ```bash
 cargo check          # Fast compilation check
-cargo test           # Run all tests (62 tests)
+cargo test           # Run all tests (95 tests)
 cargo clippy         # Lint (must pass with zero warnings)
 cargo build --release
 ```
@@ -391,6 +443,8 @@ cargo build --release
 - [x] AI insights via Ollama (CLI + TUI)
 - [x] Natural language search (`--ask`)
 - [x] Reports (monthly, yearly, compare, Markdown export)
+- [x] Email sync from Gmail bank notifications (Santander, Scotiabank, CMR Falabella)
+- [x] AI rules engine for smart tag assignment during email sync
 
 ## License
 

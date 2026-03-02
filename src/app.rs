@@ -1,3 +1,4 @@
+use std::sync::mpsc;
 use std::time::Instant;
 
 use chrono::Datelike;
@@ -168,6 +169,11 @@ pub struct App {
     pub ai_insights: Vec<String>,
     pub ai_loading: bool,
 
+    // Email sync state.
+    pub email_sync_status: Option<String>,
+    pub email_syncing: bool,
+    email_sync_rx: Option<mpsc::Receiver<crate::error::Result<crate::email::sync::SyncResult>>>,
+
     // Whether the app should quit.
     pub should_quit: bool,
 }
@@ -215,6 +221,9 @@ impl App {
             overview_expense_by_tag: Vec::new(),
             ai_insights: Vec::new(),
             ai_loading: false,
+            email_sync_status: None,
+            email_syncing: false,
+            email_sync_rx: None,
             should_quit: false,
         };
         app.reload_all()?;
@@ -656,12 +665,79 @@ impl App {
 
         // View-specific keys.
         match self.current_view {
-            View::Dashboard => {} // Dashboard only uses global keys.
+            View::Dashboard => self.handle_dashboard_key(key),
             View::Transactions => self.handle_transactions_key(key),
             View::Stats => self.handle_stats_key(key),
             View::Budgets => self.handle_budgets_key(key),
             View::Recurring => self.handle_recurring_key(key),
             View::Tags => self.handle_tags_key(key),
+        }
+    }
+
+    fn handle_dashboard_key(&mut self, key: KeyEvent) {
+        if let KeyCode::Char('S') = key.code {
+            self.sync_email();
+        }
+    }
+
+    fn sync_email(&mut self) {
+        if !self.config.gmail.enabled {
+            self.set_status("Gmail sync not enabled. Set [gmail] enabled = true in config.toml");
+            return;
+        }
+        if self.email_syncing {
+            self.set_status("Email sync already in progress...");
+            return;
+        }
+
+        self.email_syncing = true;
+        self.set_status("Syncing Gmail emails...");
+
+        // Clone config for the background thread. DB path is needed to open
+        // a separate connection (can't share &Database across threads).
+        let config = self.config.clone();
+        let db_path = self.db_path_display.clone();
+        let (tx, rx) = mpsc::channel();
+        self.email_sync_rx = Some(rx);
+
+        std::thread::spawn(move || {
+            let result = (|| {
+                let db = crate::db::connection::Database::new(std::path::Path::new(&db_path))?;
+                crate::email::sync::sync_emails(&db, &config)
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Check if background email sync has completed (called on each tick).
+    pub fn check_email_sync(&mut self) {
+        if let Some(ref rx) = self.email_sync_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.email_syncing = false;
+            self.email_sync_rx = None;
+            match result {
+                Ok(sync_result) => {
+                    let msg = format!(
+                        "Email sync: {} imported, {} skipped",
+                        sync_result.imported,
+                        sync_result.skipped_duplicate
+                            + sync_result.skipped_transfer
+                            + sync_result.skipped_parse_error
+                            + sync_result.skipped_rule,
+                    );
+                    self.email_sync_status = Some(msg.clone());
+                    self.set_status(msg);
+                    if sync_result.imported > 0
+                        && let Err(e) = self.reload_all()
+                    {
+                        self.set_status(e.user_message());
+                    }
+                }
+                Err(e) => {
+                    self.set_status(e.user_message());
+                }
+            }
         }
     }
 

@@ -12,7 +12,7 @@ CoinTUI is a terminal-based personal finance manager built with Rust, Ratatui 0.
 cargo check                        # Fast compilation check
 cargo build                        # Debug build
 cargo build --release              # Release build
-cargo test                         # Run all tests (62 unit + integration)
+cargo test                         # Run all tests (95 unit + integration)
 cargo test test_name               # Run a single test by name
 cargo test module::tests           # Run tests in a specific module (e.g. cargo test cli::add::tests)
 cargo clippy                       # Lint (must pass with zero warnings)
@@ -24,13 +24,14 @@ cargo run -- --help                # Show CLI help
 
 ### Layers (top to bottom)
 
-1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`, `--import`, `--export`, `--backup`, `--restore`, `--report`, `--insights`, `--ask`) that run before TUI launch and exit.
+1. **CLI** (`src/cli/`) - Flag-based commands (`--add`, `--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`, `--import`, `--export`, `--backup`, `--restore`, `--report`, `--insights`, `--ask`, `--sync-email`) that run before TUI launch and exit.
 2. **UI** (`src/ui/`) - Ratatui widgets, views, theme. Renders `&App` state into terminal frames.
 3. **Event** (`src/event.rs`) - `AppCommand` enum + `EventHandler` polling crossterm events.
 4. **App** (`src/app.rs`) - Central state machine. Owns `Database`, dispatches commands, manages cached data.
 5. **Domain** (`src/domain/models.rs`) - Pure data structs: `Transaction`, `Tag`, `Budget`, `RecurringEntry`.
 6. **Repository** (`src/db/`) - SQLite CRUD. Each repo takes `&Database` reference.
-7. **AI** (`src/ai/`) - Ollama integration for AI insights and natural language search. `OllamaClient` (sync HTTP via `ureq`), prompt templates in `prompts.rs`.
+7. **AI** (`src/ai/`) - Ollama integration for AI insights, natural language search, and AI rules engine. `OllamaClient` (sync HTTP via `ureq`), prompt templates in `prompts.rs`.
+8. **Email** (`src/email/`) - Gmail IMAP sync: `imap_client.rs` (connection/fetching), `sync.rs` (orchestration, AI rules engine, `TagAssignment`), `parsers/` (bank-specific: Santander, Scotiabank, CMR Falabella).
 
 ### Key types
 
@@ -97,6 +98,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - Number format defaults: `thousands_separator = "."`, `decimal_separator = ","` (Chilean). New config fields use `#[serde(default)]` for backward compatibility with existing config files.
 - Tags are managed via CLI (`--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`) or TUI (view 6). Initial seeds are hardcoded as "Other" and "Salary" in `main.rs`.
 - AI config: `[ai]` section with `enabled` (default false), `ollama_url`, `ollama_model`, `timeout_secs`. Uses `#[serde(default)]` for backward compatibility.
+- Gmail config: `[gmail]` section with `enabled`, `email`, `app_password` (or `COINTUI_GMAIL_PASSWORD` env var), `imap_host`, `imap_port`, `lookback_days` (default 90), `tag_rules` (keyword-based), `ai_tag_fallback`, `rules_prompt` (natural language AI rules for tag assignment with SKIP support).
 
 ### Adding a new view
 1. Add variant to `View` enum in `app.rs`
@@ -122,7 +124,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 ### Tests
 - DB tests use `Database::in_memory()` for isolated in-memory SQLite
 - Tag repos must seed at least one tag before creating transactions (FK constraint)
-- Run `cargo test` before committing — all 62 tests must pass
+- Run `cargo test` before committing — all 95 tests must pass
 - Test files live alongside source in `#[cfg(test)] mod tests` blocks
 
 ## Pending work (Roadmap)

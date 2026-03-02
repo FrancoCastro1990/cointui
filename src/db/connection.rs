@@ -110,6 +110,18 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_transactions_date   ON transactions(date);
             CREATE INDEX IF NOT EXISTS idx_transactions_tag_id ON transactions(tag_id);
             CREATE INDEX IF NOT EXISTS idx_transactions_kind   ON transactions(kind);
+
+            CREATE TABLE IF NOT EXISTS processed_emails (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id      TEXT    NOT NULL UNIQUE,
+                bank            TEXT    NOT NULL,
+                subject         TEXT,
+                email_date      TEXT,
+                processed_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+                status          TEXT    NOT NULL DEFAULT 'imported',
+                transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_processed_emails_message_id ON processed_emails(message_id);
             ",
         )?;
         Ok(())
@@ -153,6 +165,11 @@ impl Database {
             )?;
 
             self.conn.execute_batch("PRAGMA user_version = 2;")?;
+        }
+
+        if version < 3 {
+            // Version 2 → 3: processed_emails table (handled by CREATE IF NOT EXISTS above).
+            self.conn.execute_batch("PRAGMA user_version = 3;")?;
         }
 
         Ok(())

@@ -77,6 +77,68 @@ IMPORTANT: Respond ONLY with the JSON array, no other text."#,
     )
 }
 
+/// Build a prompt for assigning a tag to a transaction based on its description.
+pub fn build_tag_assignment_prompt(source: &str, amount: i64, tag_names: &[String]) -> String {
+    let tags = tag_names.join(", ");
+    format!(
+        r#"You are a transaction categorizer. Given a transaction, reply with ONLY the exact tag name that best matches. No other text.
+
+Available tags: {tags}
+Transaction: "{source}" (amount: {amount})
+
+Reply with exactly one tag name from the list above, nothing else."#,
+    )
+}
+
+/// Data required to build an AI rules prompt.
+pub struct AiRulesData<'a> {
+    pub rules: &'a str,
+    pub source: &'a str,
+    pub amount: i64,
+    pub kind: &'a str,
+    pub date: &'a str,
+    pub email_subject: &'a str,
+    pub tag_names: &'a [String],
+    pub currency: &'a str,
+    pub tsep: &'a str,
+    pub dsep: &'a str,
+}
+
+/// Build a prompt for AI rules-based tag assignment.
+///
+/// Uses the user's natural-language `rules_prompt` together with transaction
+/// details so Ollama can assign a tag or decide to SKIP the transaction.
+pub fn build_ai_rules_prompt(data: &AiRulesData<'_>) -> String {
+    let tags = data.tag_names.join(", ");
+    let formatted_amount = format_cents(data.amount, data.currency, data.tsep, data.dsep);
+    let rules = data.rules;
+    let source = data.source;
+    let kind = data.kind;
+    let date = data.date;
+    let email_subject = data.email_subject;
+
+    format!(
+        r#"You are a transaction categorizer for a personal finance app.
+
+USER RULES (follow these strictly):
+{rules}
+
+IMPORTANT: Only reply "SKIP" if a rule EXPLICITLY says to skip. If no rule matches, assign the most appropriate tag from the list below.
+
+AVAILABLE TAGS: {tags}
+
+TRANSACTION:
+- Source: {source}
+- Amount: {formatted_amount}
+- Type: {kind}
+- Date: {date}
+- Email subject: {email_subject}
+
+Reply with EXACTLY one tag name from the list, or "SKIP" if a rule explicitly says so.
+No other text."#,
+    )
+}
+
 /// Build a prompt for natural language query parsing.
 pub fn build_search_prompt(
     query: &str,
