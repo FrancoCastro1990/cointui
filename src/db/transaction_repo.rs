@@ -277,6 +277,16 @@ impl<'a> TransactionRepo<'a> {
     }
 
     /// Return all transactions for a specific tag.
+    /// Check if a transaction with the same source, amount, and date already exists.
+    pub fn exists_by_content(&self, source: &str, amount: i64, date: &NaiveDate) -> Result<bool> {
+        let count: i64 = self.db.conn().query_row(
+            "SELECT COUNT(*) FROM transactions WHERE source = ?1 AND amount = ?2 AND date = ?3",
+            rusqlite::params![source, amount, date.to_string()],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn get_by_tag(&self, tag_id: i64) -> Result<Vec<Transaction>> {
         let mut stmt = self.db.conn().prepare(
             "SELECT id, source, amount, kind, tag_id, date, notes, created_at, updated_at

@@ -119,7 +119,8 @@ impl Database {
                 email_date      TEXT,
                 processed_at    TEXT    NOT NULL DEFAULT (datetime('now')),
                 status          TEXT    NOT NULL DEFAULT 'imported',
-                transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL
+                transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+                account_email   TEXT    NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_processed_emails_message_id ON processed_emails(message_id);
             ",
@@ -170,6 +171,22 @@ impl Database {
         if version < 3 {
             // Version 2 → 3: processed_emails table (handled by CREATE IF NOT EXISTS above).
             self.conn.execute_batch("PRAGMA user_version = 3;")?;
+        }
+
+        if version < 4 {
+            // Version 3 → 4: add account_email column to processed_emails for multi-account support.
+            // Column may already exist if the DB was freshly created with the updated schema.
+            let has_col: bool = self.conn
+                .prepare("PRAGMA table_info(processed_emails)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(|r| r.ok())
+                .any(|name| name == "account_email");
+            if !has_col {
+                self.conn.execute_batch(
+                    "ALTER TABLE processed_emails ADD COLUMN account_email TEXT NOT NULL DEFAULT '';"
+                )?;
+            }
+            self.conn.execute_batch("PRAGMA user_version = 4;")?;
         }
 
         Ok(())

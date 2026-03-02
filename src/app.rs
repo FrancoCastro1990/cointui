@@ -172,7 +172,7 @@ pub struct App {
     // Email sync state.
     pub email_sync_status: Option<String>,
     pub email_syncing: bool,
-    email_sync_rx: Option<mpsc::Receiver<crate::error::Result<crate::email::sync::SyncResult>>>,
+    email_sync_rx: Option<mpsc::Receiver<crate::error::Result<Vec<crate::email::sync::AccountSyncResult>>>>,
 
     // Whether the app should quit.
     pub should_quit: bool,
@@ -703,7 +703,7 @@ impl App {
         std::thread::spawn(move || {
             let result = (|| {
                 let db = crate::db::connection::Database::new(std::path::Path::new(&db_path))?;
-                crate::email::sync::sync_emails(&db, &config)
+                crate::email::sync::sync_all_accounts(&db, &config)
             })();
             let _ = tx.send(result);
         });
@@ -717,18 +717,33 @@ impl App {
             self.email_syncing = false;
             self.email_sync_rx = None;
             match result {
-                Ok(sync_result) => {
-                    let msg = format!(
-                        "Email sync: {} imported, {} skipped",
-                        sync_result.imported,
-                        sync_result.skipped_duplicate
-                            + sync_result.skipped_transfer
-                            + sync_result.skipped_parse_error
-                            + sync_result.skipped_rule,
-                    );
+                Ok(account_results) => {
+                    let mut total_imported = 0usize;
+                    let mut total_skipped = 0usize;
+                    let mut errors = Vec::new();
+                    for ar in &account_results {
+                        match &ar.result {
+                            Ok(sr) => {
+                                total_imported += sr.imported;
+                                total_skipped += sr.skipped_duplicate
+                                    + sr.skipped_transfer
+                                    + sr.skipped_parse_error
+                                    + sr.skipped_rule;
+                            }
+                            Err(e) => errors.push(format!("{}: {}", ar.email, e.user_message())),
+                        }
+                    }
+                    let msg = if errors.is_empty() {
+                        format!("Email sync: {} imported, {} skipped", total_imported, total_skipped)
+                    } else {
+                        format!(
+                            "Email sync: {} imported, {} skipped ({} account error(s))",
+                            total_imported, total_skipped, errors.len()
+                        )
+                    };
                     self.email_sync_status = Some(msg.clone());
                     self.set_status(msg);
-                    if sync_result.imported > 0
+                    if total_imported > 0
                         && let Err(e) = self.reload_all()
                     {
                         self.set_status(e.user_message());

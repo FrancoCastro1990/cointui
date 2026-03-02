@@ -22,6 +22,7 @@ impl<'a> EmailRepo<'a> {
     }
 
     /// Record a processed email and return its generated id.
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,
         message_id: &str,
@@ -30,11 +31,12 @@ impl<'a> EmailRepo<'a> {
         email_date: Option<&str>,
         status: &str,
         transaction_id: Option<i64>,
+        account_email: &str,
     ) -> Result<i64> {
         self.db.conn().execute(
-            "INSERT INTO processed_emails (message_id, bank, subject, email_date, status, transaction_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![message_id, bank, subject, email_date, status, transaction_id],
+            "INSERT INTO processed_emails (message_id, bank, subject, email_date, status, transaction_id, account_email)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![message_id, bank, subject, email_date, status, transaction_id, account_email],
         )?;
         Ok(self.db.conn().last_insert_rowid())
     }
@@ -81,7 +83,7 @@ mod tests {
         let repo = EmailRepo::new(&db);
 
         let id = repo
-            .record("msg-001@gmail.com", "santander", Some("Compra"), Some("2026-01-15"), "imported", None)
+            .record("msg-001@gmail.com", "santander", Some("Compra"), Some("2026-01-15"), "imported", None, "")
             .unwrap();
         assert!(id > 0);
         assert!(repo.is_processed("msg-001@gmail.com").unwrap());
@@ -93,10 +95,10 @@ mod tests {
         let db = setup();
         let repo = EmailRepo::new(&db);
 
-        repo.record("msg-001", "santander", None, None, "imported", None).unwrap();
-        repo.record("msg-002", "santander", None, None, "imported", None).unwrap();
-        repo.record("msg-003", "cmr", None, None, "skipped_transfer", None).unwrap();
-        repo.record("msg-004", "scotiabank", None, None, "skipped_error", None).unwrap();
+        repo.record("msg-001", "santander", None, None, "imported", None, "").unwrap();
+        repo.record("msg-002", "santander", None, None, "imported", None, "").unwrap();
+        repo.record("msg-003", "cmr", None, None, "skipped_transfer", None, "").unwrap();
+        repo.record("msg-004", "scotiabank", None, None, "skipped_error", None, "").unwrap();
 
         let (imported, transfer, error) = repo.get_counts().unwrap();
         assert_eq!(imported, 2);
@@ -109,8 +111,8 @@ mod tests {
         let db = setup();
         let repo = EmailRepo::new(&db);
 
-        repo.record("msg-dup", "santander", None, None, "imported", None).unwrap();
-        let result = repo.record("msg-dup", "santander", None, None, "imported", None);
+        repo.record("msg-dup", "santander", None, None, "imported", None, "").unwrap();
+        let result = repo.record("msg-dup", "santander", None, None, "imported", None, "");
         assert!(result.is_err());
     }
 }

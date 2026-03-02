@@ -4,7 +4,7 @@ use crate::domain::models::TransactionKind;
 use crate::email::imap_client::FetchedEmail;
 use crate::error::Result;
 
-use super::{extract_amount, extract_date, html_to_text, BankParser, ParsedTransaction};
+use super::{extract_amount, extract_date, html_to_text, parse_header_date, BankParser, ParsedTransaction};
 
 /// Subjects that indicate a real transaction email (case-insensitive).
 const TRANSACTION_SUBJECTS: &[&str] = &[
@@ -48,7 +48,9 @@ impl BankParser for SantanderParser {
             _ => return Ok(Vec::new()),
         };
 
-        let date = extract_date(&body).unwrap_or_else(|| Local::now().date_naive());
+        let date = extract_date(&body)
+            .or_else(|| parse_header_date(&email.date))
+            .unwrap_or_else(|| Local::now().date_naive());
 
         let subject_lower = email.subject.to_lowercase();
 

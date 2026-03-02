@@ -215,7 +215,7 @@ fn main() -> Result<()> {
 
     // Seed default tags on a fresh database.
     let tag_repo = TagRepo::new(&db);
-    tag_repo.seed_defaults(&["Other".to_string(), "Salary".to_string()])?;
+    tag_repo.seed_defaults(&["Other".to_string(), "Salary".to_string(), "Comida Rapida".to_string()])?;
 
     // Handle CLI subcommands before launching TUI.
     if let Some(path) = cli.import {

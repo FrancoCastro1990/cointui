@@ -6,17 +6,31 @@ use crate::error::Result;
 
 use super::{
     extract_amount, extract_date, html_to_text, is_income_keyword, is_own_transfer,
-    BankParser, ParsedTransaction,
+    parse_header_date, BankParser, ParsedTransaction,
 };
 
 /// Subjects that indicate a real transaction email.
 const TRANSACTION_SUBJECTS: &[&str] = &[
     "aviso de transferencia",
-    "compra",
+    "compra aprobada",
     "pago",
     "cargo",
-    "abono",
+    "abono en cuenta",
     "comprobante",
+];
+
+/// Subjects containing these keywords are marketing, not transactions.
+const MARKETING_KEYWORDS: &[&str] = &[
+    "devolución",
+    "devolucion",
+    "dcto",
+    "descuento",
+    "beneficio",
+    "disfrutan",
+    "lista escolar",
+    "más sueldo",
+    "mas sueldo",
+    "vuelve a usar",
 ];
 
 pub struct ScotiabankParser;
@@ -31,6 +45,9 @@ impl BankParser for ScotiabankParser {
             return false;
         }
         let subject_lower = email.subject.to_lowercase();
+        if MARKETING_KEYWORDS.iter().any(|k| subject_lower.contains(k)) {
+            return false;
+        }
         TRANSACTION_SUBJECTS.iter().any(|s| subject_lower.contains(s))
     }
 
@@ -49,11 +66,15 @@ impl BankParser for ScotiabankParser {
         };
 
         let date = extract_date(&body)
+            .or_else(|| parse_header_date(&email.date))
             .unwrap_or_else(|| Local::now().date_naive());
 
         let is_transfer = is_own_transfer(&body);
 
-        let kind = if is_income_keyword(&body) {
+        let subject_lower = email.subject.to_lowercase();
+        let kind = if is_expense_keyword(&subject_lower, &body) {
+            TransactionKind::Expense
+        } else if is_income_keyword(&body) {
             TransactionKind::Income
         } else {
             TransactionKind::Expense
@@ -72,6 +93,16 @@ impl BankParser for ScotiabankParser {
             notes: Some("Auto: email sync (Scotiabank)".to_string()),
         }])
     }
+}
+
+/// Expense keywords that take priority over income detection.
+/// "abono" is ambiguous — in mortgage/loan context it means a payment (expense).
+fn is_expense_keyword(subject: &str, body: &str) -> bool {
+    let text = format!("{} {}", subject, body.to_lowercase());
+    text.contains("crédito hipotecario")
+        || text.contains("credito hipotecario")
+        || text.contains("pago cuota")
+        || text.contains("pago de cuota")
 }
 
 fn extract_merchant(text: &str) -> Option<String> {
@@ -124,6 +155,24 @@ mod tests {
         let email = make_email("promo@scotiabank.cl", "Ofertas de verano", "<html>$10.000</html>");
         let parser = ScotiabankParser;
         assert!(!parser.can_parse(&email));
+    }
+
+    #[test]
+    fn skips_marketing_with_compra_keyword() {
+        let parser = ScotiabankParser;
+        let email = make_email(
+            "alertas@scotiabank.cl",
+            "🎁20% de devolución en compras nacionales ¡Vuelve a usar tu Tarjeta de Crédito💳!",
+            "<html><body>$30.000.000</body></html>",
+        );
+        assert!(!parser.can_parse(&email));
+
+        let email2 = make_email(
+            "alertas@scotiabank.cl",
+            "✏️¡50% Dcto. adicional! Compra tu lista escolar📚",
+            "<html><body>$20.000.000</body></html>",
+        );
+        assert!(!parser.can_parse(&email2));
     }
 
     #[test]

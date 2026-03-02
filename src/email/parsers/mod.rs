@@ -1,6 +1,8 @@
 pub mod cmr_falabella;
+pub mod pedidosya;
 pub mod santander;
 pub mod scotiabank;
+pub mod uber;
 
 use chrono::NaiveDate;
 
@@ -28,6 +30,11 @@ pub trait BankParser {
     fn bank_name(&self) -> &str;
     fn can_parse(&self, email: &FetchedEmail) -> bool;
     fn parse(&self, email: &FetchedEmail) -> Result<Vec<ParsedTransaction>>;
+    /// Whether to skip transactions with the same source+amount+date.
+    /// Enable for senders that send multiple emails per transaction (e.g. Uber).
+    fn dedup_by_content(&self) -> bool {
+        false
+    }
 }
 
 /// Return all available bank parsers.
@@ -36,16 +43,29 @@ pub fn all_parsers() -> Vec<Box<dyn BankParser>> {
         Box::new(santander::SantanderParser),
         Box::new(cmr_falabella::CmrFalabellaParser),
         Box::new(scotiabank::ScotiabankParser),
+        Box::new(uber::UberParser),
+        Box::new(pedidosya::PedidosYaParser),
     ]
 }
 
+/// Result of parsing an email: bank name, transactions, and whether content dedup applies.
+pub struct ParseResult {
+    pub bank_name: String,
+    pub transactions: Vec<ParsedTransaction>,
+    pub dedup_by_content: bool,
+}
+
 /// Try to parse an email using the first matching parser.
-/// Returns `Ok(Some((bank_name, transactions)))` if parsed, `Ok(None)` if no parser matched.
-pub fn parse_email(email: &FetchedEmail) -> Result<Option<(String, Vec<ParsedTransaction>)>> {
+/// Returns `Ok(Some(ParseResult))` if parsed, `Ok(None)` if no parser matched.
+pub fn parse_email(email: &FetchedEmail) -> Result<Option<ParseResult>> {
     for parser in all_parsers() {
         if parser.can_parse(email) {
             let transactions = parser.parse(email)?;
-            return Ok(Some((parser.bank_name().to_string(), transactions)));
+            return Ok(Some(ParseResult {
+                bank_name: parser.bank_name().to_string(),
+                transactions,
+                dedup_by_content: parser.dedup_by_content(),
+            }));
         }
     }
     Ok(None)
@@ -76,16 +96,28 @@ pub(crate) fn extract_amount(text: &str) -> Option<i64> {
 }
 
 /// Try to extract a date in DD/MM/YYYY or DD-MM-YYYY format.
+/// Discards dates in the future to avoid picking up expiry/billing dates.
 pub(crate) fn extract_date(text: &str) -> Option<NaiveDate> {
-    // Try DD/MM/YYYY first, then DD-MM-YYYY
+    let today = chrono::Local::now().date_naive();
     let re = regex::Regex::new(r"(\d{2})[/-](\d{2})[/-](\d{4})").ok()?;
     if let Some(caps) = re.captures(text) {
         let day: u32 = caps.get(1)?.as_str().parse().ok()?;
         let month: u32 = caps.get(2)?.as_str().parse().ok()?;
         let year: i32 = caps.get(3)?.as_str().parse().ok()?;
-        return NaiveDate::from_ymd_opt(year, month, day);
+        if let Some(date) = NaiveDate::from_ymd_opt(year, month, day)
+            && date <= today
+        {
+            return Some(date);
+        }
     }
     None
+}
+
+/// Parse the RFC2822 Date header from an email (e.g. "Sat, 14 Feb 2026 17:14:55 +0000").
+pub(crate) fn parse_header_date(header: &str) -> Option<NaiveDate> {
+    chrono::DateTime::parse_from_rfc2822(header)
+        .ok()
+        .map(|dt| dt.date_naive())
 }
 
 /// Detect own-account transfers by keyword matching.

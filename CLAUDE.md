@@ -12,7 +12,7 @@ CoinTUI is a terminal-based personal finance manager built with Rust, Ratatui 0.
 cargo check                        # Fast compilation check
 cargo build                        # Debug build
 cargo build --release              # Release build
-cargo test                         # Run all tests (95 unit + integration)
+cargo test                         # Run all tests (105 unit + integration)
 cargo test test_name               # Run a single test by name
 cargo test module::tests           # Run tests in a specific module (e.g. cargo test cli::add::tests)
 cargo clippy                       # Lint (must pass with zero warnings)
@@ -31,7 +31,7 @@ cargo run -- --help                # Show CLI help
 5. **Domain** (`src/domain/models.rs`) - Pure data structs: `Transaction`, `Tag`, `Budget`, `RecurringEntry`.
 6. **Repository** (`src/db/`) - SQLite CRUD. Each repo takes `&Database` reference.
 7. **AI** (`src/ai/`) - Ollama integration for AI insights, natural language search, and AI rules engine. `OllamaClient` (sync HTTP via `ureq`), prompt templates in `prompts.rs`.
-8. **Email** (`src/email/`) - Gmail IMAP sync: `imap_client.rs` (connection/fetching), `sync.rs` (orchestration, AI rules engine, `TagAssignment`), `parsers/` (bank-specific: Santander, Scotiabank, CMR Falabella).
+8. **Email** (`src/email/`) - Gmail IMAP sync: `imap_client.rs` (connection/fetching), `sync.rs` (orchestration, AI rules engine, `TagAssignment`, content-based dedup), `parsers/` (bank-specific: Santander, Scotiabank, CMR Falabella, Uber, PedidosYa).
 
 ### Key types
 
@@ -75,7 +75,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - All queries use parameterized `rusqlite::params![]` — never interpolate user data into SQL
 - Repos take `&Database` references, not raw `Connection`
 - Schema lives in `Database::initialize_schema()` in `connection.rs`
-- Migrations use `PRAGMA user_version` (currently at version 2)
+- Migrations use `PRAGMA user_version` (currently at version 4)
 - Foreign keys are enforced, WAL mode is enabled
 
 ### UI / Ratatui patterns
@@ -96,9 +96,17 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 - `AppConfig` uses `directories` crate for XDG paths
 - DB at `~/.local/share/cointui/cointui.db` by default
 - Number format defaults: `thousands_separator = "."`, `decimal_separator = ","` (Chilean). New config fields use `#[serde(default)]` for backward compatibility with existing config files.
-- Tags are managed via CLI (`--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`) or TUI (view 6). Initial seeds are hardcoded as "Other" and "Salary" in `main.rs`.
+- Tags are managed via CLI (`--tags`, `--add-tag`, `--rename-tag`, `--delete-tag`) or TUI (view 6). Initial seeds are hardcoded as "Other", "Salary", and "Comida Rapida" in `main.rs`.
 - AI config: `[ai]` section with `enabled` (default false), `ollama_url`, `ollama_model`, `timeout_secs`. Uses `#[serde(default)]` for backward compatibility.
-- Gmail config: `[gmail]` section with `enabled`, `email`, `app_password` (or `COINTUI_GMAIL_PASSWORD` env var), `imap_host`, `imap_port`, `lookback_days` (default 90), `tag_rules` (keyword-based), `ai_tag_fallback`, `rules_prompt` (natural language AI rules for tag assignment with SKIP support).
+- Gmail config: `[gmail]` section with `enabled`, `imap_host`, `imap_port`, `lookback_days` (default 90), `tag_rules` (keyword-based), `ai_tag_fallback`, `rules_prompt`. Supports multiple accounts via `[[gmail.accounts]]` entries, each with `email` and `app_password`.
+
+### Email parsers
+- Each parser implements `BankParser` trait: `bank_name()`, `can_parse()`, `parse()`, and optionally `dedup_by_content()` (default false).
+- `parse_email()` returns `ParseResult` with `bank_name`, `transactions`, and `dedup_by_content` flag.
+- `extract_date()` rejects future dates. All parsers fall back to `parse_header_date()` (RFC2822 email header) when body date is missing/future, then `Local::now()` as last resort.
+- Content-based dedup (same source+amount+date) only applies to parsers that opt in via `dedup_by_content() -> true` (currently only Uber, which sends duplicate emails per trip).
+- Scotiabank parser has `MARKETING_KEYWORDS` blocklist to reject promotional emails that contain transaction-like subjects (e.g. "compra" in "20% de devolución en compras"). Also uses `is_expense_keyword()` to override income detection for mortgage payments ("crédito hipotecario", "pago cuota").
+- IMAP senders in `BANK_SENDERS` constant (`imap_client.rs`) — add new domains here when adding parsers.
 
 ### Adding a new view
 1. Add variant to `View` enum in `app.rs`
@@ -124,7 +132,7 @@ All monetary amounts are stored as **whole currency units** (`i64`). Use `format
 ### Tests
 - DB tests use `Database::in_memory()` for isolated in-memory SQLite
 - Tag repos must seed at least one tag before creating transactions (FK constraint)
-- Run `cargo test` before committing — all 95 tests must pass
+- Run `cargo test` before committing — all 105 tests must pass
 - Test files live alongside source in `#[cfg(test)] mod tests` blocks
 
 ## Pending work (Roadmap)

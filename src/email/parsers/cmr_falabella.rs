@@ -6,7 +6,7 @@ use crate::error::Result;
 
 use super::{
     extract_amount, extract_date, html_to_text, is_income_keyword, is_own_transfer,
-    BankParser, ParsedTransaction,
+    parse_header_date, BankParser, ParsedTransaction,
 };
 
 /// Subjects that indicate a real transaction email.
@@ -51,6 +51,7 @@ impl BankParser for CmrFalabellaParser {
         };
 
         let date = extract_date(&body)
+            .or_else(|| parse_header_date(&email.date))
             .unwrap_or_else(|| Local::now().date_naive());
 
         let is_transfer = is_own_transfer(&body);

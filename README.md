@@ -24,7 +24,7 @@ Track income, expenses, budgets, and recurring transactions — all from the com
 - **Persistent storage** — SQLite database with WAL mode, automatic schema migrations, and safe parameterized queries
 - **Locale-aware formatting** — Configurable thousands/decimal separators (default: Chilean format `$ 2.700.000,00`)
 - **Configurable** — TOML config for currency symbol, number format, database path, and AI settings
-- **Email sync** — Automatic transaction import from Gmail bank notifications (Santander, Scotiabank, CMR Falabella) via IMAP with deduplication
+- **Email sync** — Automatic transaction import from Gmail bank notifications (Santander, Scotiabank, CMR Falabella, Uber, PedidosYa) via IMAP with deduplication
 - **AI rules engine** — Natural language rules for smart tag assignment during email sync (e.g., "transfers to KARINA of $300.000 → Pensión", "transfers from FRANCO CASTRO → SKIP")
 - **Privacy-first** — All data stays local: SQLite database, local Ollama for AI — nothing leaves your machine
 
@@ -143,7 +143,7 @@ cointui --report monthly --output report.md
 cointui --sync-email
 ```
 
-Supported banks: Santander, Scotiabank, CMR Falabella. Requires Gmail app password (see [Gmail Config](#gmail-options-gmail-section)).
+Supported senders: Santander, Scotiabank, CMR Falabella, Uber (rides + Eats), PedidosYa. Requires Gmail app password (see [Gmail Config](#gmail-options-gmail-section)).
 
 ### AI Features (requires Ollama)
 
@@ -387,7 +387,7 @@ src/
 ├── email/
 │   ├── imap_client.rs   # IMAP connection and email fetching
 │   ├── sync.rs          # Sync orchestration, AI rules engine
-│   └── parsers/         # Bank-specific email parsers (Santander, Scotiabank, CMR)
+│   └── parsers/         # Bank-specific email parsers (Santander, Scotiabank, CMR, Uber, PedidosYa)
 └── ui/
     ├── theme.rs         # Tokyo Night color palette
     └── views/
@@ -428,7 +428,7 @@ src/
 
 ```bash
 cargo check          # Fast compilation check
-cargo test           # Run all tests (95 tests)
+cargo test           # Run all tests (105 tests)
 cargo clippy         # Lint (must pass with zero warnings)
 cargo build --release
 ```
@@ -444,7 +444,10 @@ cargo build --release
 - [x] Natural language search (`--ask`)
 - [x] Reports (monthly, yearly, compare, Markdown export)
 - [x] Email sync from Gmail bank notifications (Santander, Scotiabank, CMR Falabella)
+- [x] Uber (rides + Eats) and PedidosYa email parsers with keyword tag rules
 - [x] AI rules engine for smart tag assignment during email sync
+- [x] Content-based dedup for senders that send duplicate emails (e.g. Uber)
+- [x] Marketing email filtering for Scotiabank (rejects promotional emails)
 
 ## License
 

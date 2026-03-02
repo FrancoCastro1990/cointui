@@ -44,28 +44,62 @@ enum TagAssignment {
     Skip,
 }
 
-/// Full sync: connect to IMAP, fetch emails, parse, deduplicate, and insert transactions.
-pub fn sync_emails(db: &Database, config: &AppConfig) -> Result<SyncResult> {
+/// Per-account sync result with error isolation.
+pub struct AccountSyncResult {
+    pub email: String,
+    pub result: std::result::Result<SyncResult, AppError>,
+}
+
+/// Full sync across all configured Gmail accounts.
+/// Each account is processed independently; one failure does not block others.
+pub fn sync_all_accounts(db: &Database, config: &AppConfig) -> Result<Vec<AccountSyncResult>> {
     if !config.gmail.enabled {
         return Err(AppError::EmailSync(
             "Gmail sync is not enabled. Set [gmail] enabled = true in config.toml".into(),
         ));
     }
 
-    // Connect to IMAP.
-    let mut session = super::imap_client::connect(&config.gmail)?;
+    if config.gmail.accounts.is_empty() {
+        return Err(AppError::EmailSync(
+            "No Gmail accounts configured. Add [[gmail.accounts]] entries in config.toml".into(),
+        ));
+    }
 
-    // Calculate the "since" date for IMAP search.
     let since = Local::now()
         .date_naive()
         .checked_sub_signed(chrono::Duration::days(config.gmail.lookback_days as i64))
         .unwrap_or(Local::now().date_naive());
     let since_str = since.format("%d-%b-%Y").to_string();
 
-    // Search for bank emails.
-    let bank_results = super::imap_client::search_bank_emails(&mut session, &since_str)?;
+    let mut results = Vec::new();
 
-    // Fetch all matching emails.
+    for account in &config.gmail.accounts {
+        let account_result = sync_single_account(db, config, account, &since_str);
+        results.push(AccountSyncResult {
+            email: account.email.clone(),
+            result: account_result,
+        });
+    }
+
+    Ok(results)
+}
+
+/// Sync a single Gmail account.
+fn sync_single_account(
+    db: &Database,
+    config: &AppConfig,
+    account: &crate::config::GmailAccount,
+    since_str: &str,
+) -> std::result::Result<SyncResult, AppError> {
+    let mut session = super::imap_client::connect(
+        &config.gmail.imap_host,
+        config.gmail.imap_port,
+        &account.email,
+        &account.app_password,
+    )?;
+
+    let bank_results = super::imap_client::search_bank_emails(&mut session, since_str)?;
+
     let mut all_emails: Vec<(String, FetchedEmail)> = Vec::new();
     for (bank_name, seq_nums) in &bank_results {
         let emails = super::imap_client::fetch_emails(&mut session, seq_nums)?;
@@ -74,11 +108,9 @@ pub fn sync_emails(db: &Database, config: &AppConfig) -> Result<SyncResult> {
         }
     }
 
-    // Logout from IMAP (best effort).
     let _ = session.logout();
 
-    // Process fetched emails.
-    process_fetched_emails(db, config, &all_emails)
+    process_fetched_emails(db, config, &all_emails, &account.email)
 }
 
 /// Process already-fetched emails. This is the testable core that doesn't require IMAP.
@@ -86,6 +118,7 @@ pub fn process_fetched_emails(
     db: &Database,
     config: &AppConfig,
     emails: &[(String, FetchedEmail)],
+    account_email: &str,
 ) -> Result<SyncResult> {
     let email_repo = EmailRepo::new(db);
     let tx_repo = TransactionRepo::new(db);
@@ -114,7 +147,7 @@ pub fn process_fetched_emails(
 
         // Parse the email.
         let parsed = match parsers::parse_email(email) {
-            Ok(Some((bank, txs))) => Some((bank, txs)),
+            Ok(Some(pr)) => Some(pr),
             Ok(None) => None,
             Err(_) => {
                 result.skipped_parse_error += 1;
@@ -125,13 +158,14 @@ pub fn process_fetched_emails(
                     Some(&email.date),
                     "skipped_error",
                     None,
+                    account_email,
                 )?;
                 continue;
             }
         };
 
-        let (bank, transactions) = match parsed {
-            Some((b, txs)) if !txs.is_empty() => (b, txs),
+        let parse_result = match parsed {
+            Some(pr) if !pr.transactions.is_empty() => pr,
             _ => {
                 result.skipped_parse_error += 1;
                 email_repo.record(
@@ -141,12 +175,16 @@ pub fn process_fetched_emails(
                     Some(&email.date),
                     "skipped_error",
                     None,
+                    account_email,
                 )?;
                 continue;
             }
         };
 
-        for parsed_tx in &transactions {
+        let bank = parse_result.bank_name;
+        let dedup = parse_result.dedup_by_content;
+
+        for parsed_tx in &parse_result.transactions {
             // Skip own-account transfers.
             if parsed_tx.is_transfer {
                 result.skipped_transfer += 1;
@@ -157,6 +195,7 @@ pub fn process_fetched_emails(
                     Some(&email.date),
                     "skipped_transfer",
                     None,
+                    account_email,
                 )?;
                 continue;
             }
@@ -172,11 +211,28 @@ pub fn process_fetched_emails(
                         Some(&email.date),
                         "skipped_rule",
                         None,
+                        account_email,
                     )?;
                     continue;
                 }
                 TagAssignment::Assigned(id) => id,
             };
+
+            // Content-based dedup: skip if same source + amount + date already exists.
+            // Only applies to parsers that opt in (e.g. Uber sends duplicate emails per trip).
+            if dedup && tx_repo.exists_by_content(&parsed_tx.source, parsed_tx.amount, &parsed_tx.date)? {
+                result.skipped_duplicate += 1;
+                email_repo.record(
+                    &email.message_id,
+                    &bank,
+                    Some(&email.subject),
+                    Some(&email.date),
+                    "skipped_duplicate",
+                    None,
+                    account_email,
+                )?;
+                continue;
+            }
 
             // Create transaction.
             let tx = Transaction {
@@ -200,6 +256,7 @@ pub fn process_fetched_emails(
                         Some(&email.date),
                         "imported",
                         Some(tx_id),
+                        account_email,
                     )?;
                     result.imported += 1;
                 }
@@ -213,6 +270,7 @@ pub fn process_fetched_emails(
                         Some(&email.date),
                         "skipped_error",
                         None,
+                        account_email,
                     )?;
                 }
             }
@@ -314,7 +372,7 @@ mod tests {
     #[test]
     fn process_empty_list() {
         let (db, config) = setup();
-        let result = process_fetched_emails(&db, &config, &[]).unwrap();
+        let result = process_fetched_emails(&db, &config, &[], "").unwrap();
         assert_eq!(result.emails_found, 0);
         assert_eq!(result.imported, 0);
     }
@@ -336,7 +394,7 @@ mod tests {
         };
 
         let emails = vec![("santander".to_string(), email)];
-        let result = process_fetched_emails(&db, &config, &emails).unwrap();
+        let result = process_fetched_emails(&db, &config, &emails, "").unwrap();
         assert_eq!(result.emails_found, 1);
         assert_eq!(result.imported, 1);
     }
@@ -358,10 +416,10 @@ mod tests {
         };
 
         let emails = vec![("santander".to_string(), email.clone())];
-        let r1 = process_fetched_emails(&db, &config, &emails).unwrap();
+        let r1 = process_fetched_emails(&db, &config, &emails, "").unwrap();
         assert_eq!(r1.imported, 1);
 
-        let r2 = process_fetched_emails(&db, &config, &emails).unwrap();
+        let r2 = process_fetched_emails(&db, &config, &emails, "").unwrap();
         assert_eq!(r2.imported, 0);
         assert_eq!(r2.skipped_duplicate, 1);
     }
@@ -384,7 +442,7 @@ mod tests {
         };
 
         let emails = vec![("scotiabank".to_string(), email)];
-        let result = process_fetched_emails(&db, &config, &emails).unwrap();
+        let result = process_fetched_emails(&db, &config, &emails, "").unwrap();
         assert_eq!(result.skipped_transfer, 1);
         assert_eq!(result.imported, 0);
     }
@@ -414,7 +472,7 @@ mod tests {
         };
 
         let emails = vec![("santander".to_string(), email)];
-        let result = process_fetched_emails(&db, &config, &emails).unwrap();
+        let result = process_fetched_emails(&db, &config, &emails, "").unwrap();
         assert_eq!(result.imported, 1);
 
         // Verify the transaction was assigned the Food tag.

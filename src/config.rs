@@ -13,14 +13,20 @@ pub struct TagRule {
     pub tag: String,
 }
 
+/// A single Gmail account with credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GmailAccount {
+    pub email: String,
+    pub app_password: String,
+}
+
 /// Gmail IMAP configuration for email sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GmailConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
-    pub email: String,
-    pub app_password: Option<String>,
+    pub accounts: Vec<GmailAccount>,
     #[serde(default = "default_imap_host")]
     pub imap_host: String,
     #[serde(default = "default_imap_port")]
@@ -51,8 +57,7 @@ impl Default for GmailConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            email: String::new(),
-            app_password: None,
+            accounts: Vec::new(),
             imap_host: default_imap_host(),
             imap_port: default_imap_port(),
             lookback_days: default_lookback_days(),
@@ -60,19 +65,6 @@ impl Default for GmailConfig {
             ai_tag_fallback: false,
             rules_prompt: String::new(),
         }
-    }
-}
-
-impl GmailConfig {
-    /// Resolve the Gmail app password. Checks `COINTUI_GMAIL_PASSWORD` env var
-    /// first, then falls back to `app_password` in config.
-    pub fn resolve_password(&self) -> Option<String> {
-        if let Ok(pw) = std::env::var("COINTUI_GMAIL_PASSWORD")
-            && !pw.is_empty()
-        {
-            return Some(pw);
-        }
-        self.app_password.clone()
     }
 }
 

@@ -3,7 +3,6 @@ use std::net::TcpStream;
 use imap::Session;
 use native_tls::TlsStream;
 
-use crate::config::GmailConfig;
 use crate::error::{AppError, Result};
 
 /// An email fetched from IMAP with parsed headers and body.
@@ -22,30 +21,31 @@ const BANK_SENDERS: &[(&str, &str)] = &[
     ("santander", "santander.cl"),
     ("cmr_falabella", "falabella.com"),
     ("scotiabank", "scotiabank.cl"),
+    ("uber", "uber.com"),
+    ("pedidosya", "pedidosya.com"),
 ];
 
 /// Connect to Gmail IMAP and return an authenticated session.
-pub fn connect(config: &GmailConfig) -> Result<Session<TlsStream<TcpStream>>> {
-    let password = config.resolve_password().ok_or_else(|| {
-        AppError::EmailSync(
-            "No Gmail password configured. Set COINTUI_GMAIL_PASSWORD env var or app_password in config.toml".into(),
-        )
-    })?;
-
+pub fn connect(
+    imap_host: &str,
+    imap_port: u16,
+    email: &str,
+    password: &str,
+) -> Result<Session<TlsStream<TcpStream>>> {
     let tls = native_tls::TlsConnector::builder()
         .build()
-        .map_err(|e| AppError::EmailSync(format!("TLS error: {e}")))?;
+        .map_err(|e| AppError::EmailSync(format!("[{email}] TLS error: {e}")))?;
 
     let client = imap::connect(
-        (config.imap_host.as_str(), config.imap_port),
-        &config.imap_host,
+        (imap_host, imap_port),
+        imap_host,
         &tls,
     )
-    .map_err(|e| AppError::EmailSync(format!("IMAP connection failed: {e}")))?;
+    .map_err(|e| AppError::EmailSync(format!("[{email}] IMAP connection failed: {e}")))?;
 
     let session = client
-        .login(&config.email, &password)
-        .map_err(|e| AppError::EmailSync(format!("IMAP login failed: {}", e.0)))?;
+        .login(email, password)
+        .map_err(|e| AppError::EmailSync(format!("[{email}] IMAP login failed: {}", e.0)))?;
 
     Ok(session)
 }
